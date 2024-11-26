@@ -1,10 +1,10 @@
-### Define full CRN
-
 using Catalyst
 using OrdinaryDiffEq
+include((@__DIR__) * "/plot_helper.jl");
 
 t = default_t(); # time variable
 
+### Define full CRN
 # Species and complexes
 x_species = @species X1(t) X2(t) X3(t);
 complexes_vec = [[X1], [X2], [X3], [X1, X2], [X2, X3], [X1, X3]];
@@ -31,10 +31,13 @@ redirect_stdout(out_file) do
 end
 close(out_file)
 
+
+### Read in data
+using DelimitedFiles
+data = readdlm((@__DIR__) * "/data.txt");
+
+
 ### Verify full CRN can reproduce 'ground truth' CRN (sim_data.jl)
-
-include((@__DIR__) * "/plot_helper.jl");
-
 true_kvec = zeros(n_rx);
 true_kvec[18] = true_kvec[13] = true_kvec[1] = 1.;
 x0map = [:X1 => 0., :X2 => 0., :X3 => 1.];
@@ -43,21 +46,15 @@ t_span = (0., 10.);
 oprob = ODEProblem(full_network, x0map, t_span, [k => true_kvec]);
 sol = solve(oprob);
 
-f = Figure()
-ax = Axis(f[1,1], xlabel=L"t")
-for i in 1:3
-	lines!(sol.t, [pt[i] for pt in sol.u], label=L"X_%$i")
-end
-axislegend(position=:lt);
-f
+# These two sets of values should be similar
+sol.u[end]
+data[:,end]
 
 
-### Parameter estimation
+### Parameter estimation, assuming known initial conditions
 using LineSearches
 using Optim
-using DelimitedFiles
 
-data = readdlm((@__DIR__) * "/data.txt");
 σ = 0.01; # assume noise SD is known
 
 # penalty_func is generic, can interpret as the negative log density of some prior on parameters
@@ -72,11 +69,13 @@ function loss_func(params, oprob, y, t_obs, penalty_func)
 	sum(abs2.(y .- reduce(hcat, sol(t_obs).u))) / (2σ^2) + sum(penalty_func.(params))
 end
 
-L1_loss(x) = 10*x; # negative log density of Exp(rate = 10)
+L1_loss(x) = 10*x; # negative log density of Exponential(rate = 10)
 
+# Check that the second value is much smaller than the first value
 loss_func(ones(n_rx), oprob, data, t_obs, L1_loss)
-loss_func(true_kvec, oprob, data, t_obs, L1_loss) # this should be much smaller than the line above
+loss_func(true_kvec, oprob, data, t_obs, L1_loss)
 
+# Check that ODE solution runs quickly
 @time solve(oprob);
 
 # 10 runs of optimisation, show runtime and minimum value found
@@ -97,14 +96,15 @@ res_vec = [begin
 end for s in 1:10
 ];
 
-[r.minimum for r in res_vec]
-
+# Show heatmap (log10 scale) of reaction rate constants for all runs
 kmat = reduce(hcat, [r.minimizer for r in res_vec]);
-fig, ax, hm = heatmap(log10.(kmat), colormap=:Blues);
-Colorbar(fig[:, end+1], hm)
-fig
+f = Figure()
+ax = Axis(f[1,1], xlabel="Reaction index", ylabel="Optimisation run")
+hm = heatmap!(log10.(kmat), colormap=:Blues);
+Colorbar(f[:, end+1], hm)
+f
 
-## Visualise estimated reaction rates and trajectories simulated from these rates
+# Visualise estimated reaction rates and trajectories simulated from these rates
 t_grid = range(t_span..., 1001);
 for (run_idx, opt_res) in enumerate(res_vec)
 	f = Figure()
