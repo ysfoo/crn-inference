@@ -2,9 +2,10 @@
 
 Project during MATRIX program "Parameter Identifiability in Mathematical Biology" (Sep 2024).
 
-Run `sim_data.jl` to create synthetic data. The ground truth CRN is given by:
-$$X_1 \xrightarrow[]{k_{1}} X_2$$
-$$X_1 + X_2 \xrightleftharpoons[k_{13}]{k_{18}} X_3$$
+Run `sim_data.jl` to create synthetic data. The ground truth CRN consists of the reactions
+
+![equation](https://latex.codecogs.com/svg.image?%5Cbg_white%20X_1\xrightarrow[]{k_{1}}X_2\quad\text{&space;and&space;}\quad&space;X_1&plus;X_2\overset{k_{18}}{\underset{k_{13}}\rightleftharpoons}X_3.)
+
 The subscripts correspond to indices of a list of 30 candidate reactions; see `output/reactions.txt`. Our aim is to infer the ground truth CRN from noisy time series data generated from `sim_data.jl`. This is done by estimating the rate constants of the 30 candidate reactions via a sparse optimisation approach.
 
 Run `inference.jl` for CRN inference results. The script `inference.jl` requires command-line arguments to be specified; run `julia inference.jl --help` for a description. In summary, these command-line arguments specify (a) whether optimisation is performed on the log scale of the parameters, and (b) the penalty function of the parameters, which is one of
@@ -21,7 +22,7 @@ The images `inferred_rates_heatmap.png` summarise estimated reaction rate consta
 
 The images `inferred_rates_histogram.png` aggregate the estimated reaction rate constants over reactions and runs. In order to infer which reactions are present in the system, we need to choose a cutoff value. The $L_1$ penalty function on the shifted-log scale leads to the clearest separation of negligible and non-negligible rate constants. Other penalty functions require a more subjective choice of a cutoff value.
 
-The images `inferred_rates_run[x].png` present a more detailed view of the estimated reaction rates. Some of the local minima correspond to CRNs that are dynamically equivalent to the ground truth, e.g. the local minimum corresponding to `output/logL1_uselog/inferred_rates_run3.png` is explained by the fact that the reactions $X_3 \xrightarrow[]{k_{12}} X_2$ and $X_3 \xrightarrow[]{k_{15}} X_1 + X_3$ induce the same dynamics as the reaction $X_3 \xrightarrow[]{k_{13}} X_1 + X_2$ where $k_{12} = k_{15} = k_{13}$.
+The images `inferred_rates_run[x].png` present a more detailed view of the estimated reaction rates. Some of the local minima correspond to CRNs that are dynamically equivalent to the ground truth, e.g. the local minimum corresponding to `output/logL1_uselog/inferred_rates_run3.png` is explained by the fact that the reactions $X_3 \rightarrow X_2$ and $X_3 \rightarrow X_1 + X_3$ induce the same dynamics as the reaction $X_3 \rightarrow X_1 + X_2$ where when all these reactions share the same rate constants.
 
 Things to do if I can be bothered to:
 - Automatic determination of reaction rate cutoff
