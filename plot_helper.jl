@@ -1,5 +1,8 @@
 using CairoMakie
 using Colors
+using Format
+
+FMT_2DP = ".2f";
 
 # Plotting setup
 set_theme!(theme_latexfonts());
