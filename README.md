@@ -4,7 +4,7 @@ Project during MATRIX program "Parameter Identifiability in Mathematical Biology
 
 Run `sim_data.jl` to create synthetic data. The ground truth CRN consists of the reactions
 
-![equation](https://latex.codecogs.com/svg.image?%5Cbg_white%20X_1\xrightarrow[]{k_{1}}X_2\quad\text{&space;and&space;}\quad&space;X_1&plus;X_2\overset{k_{18}}{\underset{k_{13}}\rightleftharpoons}X_3.)
+![equation](https://latex.codecogs.com/png.image?\dpi{200}\bg{white}X_1\xrightarrow[]{k_{1}}X_2\quad\text{&space;and&space;}\quad&space;X_1&plus;X_2\overset{k_{18}}{\underset{k_{13}}\rightleftharpoons}X_3.)
 
 The subscripts correspond to indices of a list of 30 candidate reactions; see `output/reactions.txt`. Our aim is to infer the ground truth CRN from noisy time series data generated from `sim_data.jl`. This is done by estimating the rate constants of the 30 candidate reactions via a sparse optimisation approach.
 
