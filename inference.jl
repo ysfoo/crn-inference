@@ -1,261 +1,239 @@
-##################################################
-# Setup for command-line arguments
-# Skip this when interacting with this script
-using ArgParse
+#####################################
+### Main module for CRN inference ###
+#####################################
 
-s = ArgParseSettings()
-@add_arg_table s begin
-	"--pen"
-        help = "penalty function, one of [L1|logL1|approxL0|hslike]"
-		required = true
-		range_tester = x -> x in ["L1", "logL1", "approxL0", "hslike"]
-	"--uselog"
-        help = "whether to perform optimisation in log space, either [y/n]"
-		required = true
-		range_tester = x -> lowercase(x) in ["y", "n"]
-	"--skipopt"
-		help = "if this flag is invoked, skip optimisation and only export results (requires optimisation to have previously run)"
-		action = :store_true
-end
-parsed_args = parse_args(s)
-##################################################
-
-### If interacting, start here (define optimisation options)
-if @isdefined parsed_args # command-line mode
-	PEN_STR = parsed_args["pen"]
-	USE_LOG = lowercase(parsed_args["uselog"]) == "y"
-	SKIP_OPT = parsed_args["skipopt"]
-else # interactive mode
-	### NB: these optimisation options need to be manually changed
-	PEN_STR = "approxL0"; # L1, logL1, approxL0, hslike
-	USE_LOG = true; # run optimisation on the original scale of parameters or on the log scale?
-	SKIP_OPT = false; # if true, skip optimisation and only export results
-end
-
-# Directory name for these optimisation options
-OPT_DIR = PEN_STR * (USE_LOG ? "_uselog" : "_nolog");
-
-
-using Catalyst
 using OrdinaryDiffEq
 
-include((@__DIR__) * "/plot_helper.jl");
-t = default_t(); # time variable
-
-
-### Define full CRN
-# Species and complexes
-x_species = @species X1(t) X2(t) X3(t);
-complexes_vec = [[X1], [X2], [X3], [X1, X2], [X2, X3], [X1, X3]];
-
-# Reactions
-rct_prd_pairs = [
-	(reactants, products) for reactants in complexes_vec for products in complexes_vec 
-	if reactants !== products
-]; # reactants-products pair for each reaction
-n_rx = length(rct_prd_pairs); # number of reactions
-@parameters k[1:n_rx] # reaction rate constants
-reactions = [
-	Reaction(kval, reactants, products) for ((reactants, products), kval) in zip(rct_prd_pairs, k)
-];
-
-# Full CRN
-@named full_network = ReactionSystem(reactions, t)
-full_network = complete(full_network)
-
-# Export all reactions
-out_file = open((@__DIR__) * "/output/reactions.txt", "w")
-redirect_stdout(out_file) do
-    println.(reactions);
-end
-close(out_file)
-
-
-### Read in data
 using DelimitedFiles
-fullmat = readdlm((@__DIR__) * "/output/data.txt");
-n_obs = size(fullmat, 1);
-t_obs = fullmat[:,1];
-data = fullmat[:,2:end]';
-n_obs = length(t_obs);
-t_span = extrema(t_obs);
+
+using LineSearches
+using Optim
+using Random
+
+include(joinpath(@__DIR__, "plot_helper.jl"));
+
+# oprob        : ODEProblem to be passed to `remake` whenever loss function is evaluated
+# t_obs        : Sequence of observation times
+# data         : Concentration observations in a matrix of dimensions n_species x n_obs
+# tf           : Trnasformation function from rate space to optimisation space, e.g. log
+# itf          : Inverse transformation function from optimisation space back to rate space
+# penalty_func : Penalty function on rate constants, e.g. L1 penalty
+# optim_func   : Function of rate constants to be optimised for parameter inference
+# NB: `penalty_func` is defined on the original space, ` optim_func` is defined on the transformed space
+struct ODEInferenceProb
+	oprob::ODEProblem
+	t_obs::AbstractVector{<:Real}
+	data::AbstractMatrix{<:Real}
+	tf::Function
+	itf::Function
+	penalty_func::Function
+	optim_func::Function
+end
+
+### Functions to be directly called when using this module
+
+# Read in data
+function read_data(data_dir, data_fname="data.txt")
+	fullmat = readdlm(joinpath(data_dir, data_fname));
+	t_obs = fullmat[:,1];
+	data = fullmat[:,2:end]';
+	return t_obs, data # NB: `data` is a matrix of dimensions n_species x n_obs
+end
+
+# Create an ODEInferenceProb struct
+# See section under "Helper functions" for specifics about penalty functions, e.g. defaults for hyperparameters
+# See comments around the definition of ODEInferenceProb for definitions of `oprob`, `t_obs`, `data`
+# penalty_str : Choice of penalty function, one of < L1 | logL1 | approxL0 | hslike >
+# k           : Symbolics object for reaction rate constants, e.g. as defined in `full_network.jl`
+# lower_bound : Lower bound, e.g. 1e-10 to clip parameters away from 0 to prevent issues such as log(0)
+# log_opt     : Whether to perform optimisation in log space, default to true
+# pen_hyp     : Hyperparameter for penalty function
+function make_iprob(oprob, t_obs, data, penalty_str, lower_bound, k; log_opt=true, pen_hyp=nothing)
+	penalty_func = make_penalty_func(penalty_str, pen_hyp)
+	if log_opt
+		tf = u -> log(max(lower_bound, u))
+		itf = exp
+	else
+		tf = u -> max(lower_bound, u)
+		itf = identity
+	end
+	optim_func = u -> loss_func(itf.(u), oprob, t_obs, data, penalty_func, k);
+	return ODEInferenceProb(oprob, t_obs, data, tf, itf, penalty_func, optim_func)
+end
+
+# Returns `n` random vectors of `m` entries each, drawn from Unif(0, 1)
+function rand_inits(n, m, seed=nothing)
+	Random.seed!(seed)
+	return [rand(m) for _ in 1:n]
+end
+
+# Performs multi-start optimisation from different initial points for parameter inference
+# iprob         : ODEInferenceProb struct
+# lbs           : Vector of lower bounds for parameters
+# ubs           : Vector of upper bounds for parameters
+# init_vec      : Vector of initial points for optimisation runs
+# opt_alg       : Optimisation algorithm from `Optim.jl`
+# callback_func : Function for displaying progress of each run, takes in run index (integer) and optimisation result as input
+function optim_iprob(
+	iprob, lbs, ubs, init_vec; 
+	opt_alg=Fminbox(BFGS(linesearch = LineSearches.BackTracking())),
+	callback_func=(i, res) -> nothing
+)
+	res_vec = Vector{Optim.MultivariateOptimizationResults}([]);
+	for (i, init_params) in enumerate(init_vec)
+		res = optimize(
+			iprob.optim_func, iprob.tf.(lbs), iprob.tf.(ubs), iprob.tf.(init_params),
+			opt_alg; autodiff = :forward
+		)
+		callback_func(i, res)
+		push!(res_vec, res)
+	end
+	return res_vec
+end
+
+# Store estimated rate constants (parameters)
+# res_vec : Vector of optimisation results
+# iprob   : ODEInferenceProb struct
+# dirname : Directory to store estimated rate constants in
+# fname   : Filename for estimated rate constants
+function export_estimates(res_vec, iprob, dirname, fname="inferred_rates.txt")
+	kmat = reduce(hcat, [iprob.itf.(r.minimizer) for r in res_vec]); # dimensions are n_rx x n_runs
+	writedlm(joinpath(dirname, fname), kmat);
+	return kmat
+end
 
 
-### Optional: Verify full CRN can reproduce 'ground truth' CRN (sim_data.jl)
-true_kvec = zeros(n_rx);
-true_kvec[18] = true_kvec[13] = true_kvec[1] = 1.;
-x0map = [:X1 => 0., :X2 => 0., :X3 => 1.];
+# Generate plots for results
+# iprob     : ODEInferenceProb struct
+# kmat      : Matrix of estimated rate constants, dimensions are n_rx x n_runs
+# true_kvec : Vector of true rate constants
+# k         : Symbolics object for reaction rate constants, e.g. as defined in `full_network.jl`
+# dirname   : Directory to store plots in
+function make_plots(iprob, kmat, true_kvec, k, dirname)
+	n_rx, n_runs = size(kmat)
+	n_species = length(iprob.oprob.u0)
+	# Optimised value of loss function for each run
+	optim_loss = iprob.optim_func.(eachcol(iprob.tf.(kmat)))
+	# Run indices ranked by optimised value of loss function
+	ranked_order = sortperm(optim_loss);
+	# Loss function evaluated for the ground truth parameters
+	true_loss = iprob.optim_func(iprob.tf.(true_kvec))
 
-oprob = ODEProblem(full_network, x0map, t_span, [k => true_kvec]);
-sol = solve(oprob);
+	# 1. Heatmap of estimated rate constants (all runs on same plot)
+	f = Figure();
+	ax = Axis(
+		f[1,1], 
+		title="Estimated rate constants for each run", 
+		xlabel="Reaction index", 
+		ylabel="Loss offset (relative to loss under true rate constants)",
+		yticks=(1:n_runs, pyfmt.(FMT_2DP, optim_loss[ranked_order].-true_loss))
+	);
+	hm = heatmap!(kmat[:,ranked_order], colormap=:Blues);
+	Colorbar(f[:, end+1], hm);
+	# A bizzare hack to draw boxes to appear on top of the axis spines for aesthetic reasons
+	true_rxs = Observable(findall(>(0.), true_kvec))
+	rects_screenspace = lift(true_rxs, ax.finallimits, ax.scene.viewport) do xs, lims, pxa
+		rects = map(xs) do x
+			Rect(
+				pxa.origin[1] + pxa.widths[1]*(x-0.5-lims.origin[1])/lims.widths[1],
+				pxa.origin[2],
+				pxa.widths[1] / n_rx,
+				pxa.widths[2]	
+			)
+		end
+	end
+	boxes = poly!(ax.blockscene, rects_screenspace, color=(:white, 0.0), strokewidth=3)
+	translate!(boxes, 0, 0, 100)
+	f
+	save(joinpath(dirname, "inferred_rates_heatmap.png"), f);
 
-# These two sets of values should be similar (sanity check)
-sol.u[end] # final point for trajectory simulated from full model
-data[:,end] # final data point (noisy)
+	# 2. Histogram of all estimated rate constants aggregated over all runs
+	bin_edges = 10 .^ range(-10, 2, 25);
+	f = hist(
+		vec(kmat), bins=bin_edges, label="All runs"; 
+		axis=(;
+			:title=>"Histogram of estimated rate constants (aggregated over all runs)", 
+			:xlabel=>"Estimated rate constants", 
+			:xscale=>log10,
+			:xticks=>LogTicks(LinearTicks(7)),
+		)
+	)
+	hist!(kmat[:,ranked_order[1]], bins=bin_edges, label="Best run")
+	axislegend(position=:rt)
+	ylims!(0., 32.);
+	save(joinpath(dirname, "inferred_rates_histogram.png"), f);
 
+	# 3. Dotplot of estimated rate constants compared to ground truth (one plot per run)
+	for run_idx in 1:n_runs
+		kvec = kmat[:,run_idx]
+		loss_offset = pyfmt(FMT_2DP, optim_loss[run_idx] - true_loss)	
+		f = Figure()
+		title = "True and estimated reaction rate constants\n(Run $run_idx, loss offset = $loss_offset)"
+		ax = Axis(f[1,1], title=title, xlabel="Reaction index", ylabel="Reaction rate constant")
+		scatter!(1:n_rx, true_kvec, alpha=0.7, label="Ground truth")
+		scatter!(1:n_rx, kvec, alpha=0.7, label="Estimated")
+		f[2, 1] = Legend(f, ax, orientation=:horizontal);
+		save(joinpath(dirname, "inferred_rates_run$(run_idx).png"), f)
+	end
 
-### Parameter estimation, assuming known initial conditions
+	# 4. Trajectories reconstructed from estimates compared to ground truth (one plot per run)
+	t_grid = range(t_span..., 1001);
+	true_oprob = remake(iprob.oprob, p=[k => true_kvec])
+	true_sol_grid = solve(true_oprob)(t_grid);
+	for run_idx in 1:n_runs
+		kvec = kmat[:,run_idx]
+		loss_offset = pyfmt(FMT_2DP, optim_loss[run_idx] - true_loss)
+		est_oprob = remake(iprob.oprob, p=[k => kvec])
+		est_sol_grid = solve(est_oprob)(t_grid);
+		f = Figure()
+		title = "ODE trajectories (Run $run_idx, loss offset = $loss_offset)"
+		ax = Axis(f[1,1], title=title, xlabel=L"t", ylabel="Concentration")
+		for i in 1:n_species
+			lines!(t_grid, [pt[i] for pt in true_sol_grid], color=palette[i], alpha = 0.8, label=L"True $X_%$i$")
+		end
+		for i in 1:n_species
+			lines!(t_grid, [pt[i] for pt in est_sol_grid], color=palette[i], linestyle=:dash, label=L"Est. $X_%$i$")
+		end
+		axislegend(position=:rc);
+		save(joinpath(dirname, "inferred_trajs_run$(run_idx).png"), f)
+	end
+end
 
-σ = 0.01; # assume noise SD is known
+### Helper functions that do not need to be directly called when using this module
 
-# `penalty_func` is generic, interpreted as the negative log density of some prior on parameters
-function loss_func(params, oprob, y, t_obs, penalty_func)
+# Loss function to minimise for parameter estimation, note that `penalty_func` is generic
+function loss_func(params, oprob, t_obs, data, penalty_func, k)
 	oprob = remake(oprob, p=[k => params]);
 	sol = try 
 		solve(oprob);
 	catch e
 		return Inf
 	end
-
-	sum(abs2.(y .- reduce(hcat, sol(t_obs).u))) / (2σ^2) + sum(penalty_func.(params))
+	sum(abs2.(data .- reduce(hcat, sol(t_obs).u))) / (2σ^2) + sum(penalty_func.(params))
 end
 
-LB, UB = 1e-10, 1e2; # bounds for reaction rate constants (i.e. parameters)
-lbs = LB .* ones(n_rx);
-ubs = UB .* ones(n_rx);
-
-# Penalty functions
-L1_pen(x) = x/0.01; # Exponential(scale = 0.01)
-logL1_pen(x) = log(max(LB, x))*(1/1.0); # Exponential(scale = 1.0) for log rates
-approxL0_pen(x) = log(n_obs)/2*x^0.1; # x^0.1 approximates #params, coefficient is inspired by BIC
-hslike_pen(x) = -log(log(1 + abs2(0.01/x))); # horseshoe-like prior, scale = 0.01
-
-chosen_pen = eval(Meta.parse(PEN_STR * "_pen"));
-
-# `max(LB, u)` clamps values to be >= LB since some penalty functions are undefined at 0
-if USE_LOG
-	tf(u) = log(max(LB, u)); # log transform
-	itf(u) = exp(u) # inverse of log transform, i.e. exp
-	optim_func = u -> loss_func(itf.(u), oprob, data, t_obs, chosen_pen);
-else
-	tf(u) = max(LB, u); itf(u) = u;
-	optim_func = u -> loss_func(u, oprob, data, t_obs, chosen_pen);	
+# Penalty functions on parameters
+# Some of these can be interpreted as the negative log density of some prior distribution
+# Increasing the hyperparameter `hyp` penalises model complexity more heavily
+function L1_pen(x, hyp=1e2) # Exponential(scale = 1/hyp)
+	hyp*x
+end
+function logL1_pen(x, hyp=1.0) # Exponential(scale = 1/hyp) for log rates
+	hyp*log(x)
+end
+function approxL0_pen(x, hyp=1.0) # hyp * no of params, which is approximated by x^0.1
+	hyp*x^0.1
+end
+function hslike_pen(x, hyp=1e2) # horseshoe-like prior, scale = 1/hyp
+	-log(log(1 + abs2(1/(hyp*x))))
 end
 
-# Sanity check: Second value should be much smaller than the first value
-optim_func(tf.(ones(n_rx)))
-true_loss = optim_func(tf.(true_kvec))
-
-# Perform 10 runs of optimisation, show runtime and minimum value found
-begin
-	if SKIP_OPT @goto after_opt end	
-
-	using LineSearches
-	using Optim
-	using Random
-
-	# First run of optimisation takes longer
-	# @time opt_res = optimize(
-	# 	optim_func, tf.(lbs), tf.(ubs), tf.(rand(n_rx)),
-	# 	Fminbox(BFGS(linesearch = LineSearches.BackTracking()));
-	# 	autodiff = :forward
-	# )
-
-	# 10 runs of optimisation, show runtime and loss offset
-	res_vec = Vector{Optim.MultivariateOptimizationResults}([]);
-	n_runs = 10;
-	for s in 1:n_runs
-		Random.seed!(s)
-		init_params = rand(n_rx) # randomise the optimisation starting point
-		@time local opt_res = optimize(
-			optim_func, tf.(lbs), tf.(ubs), tf.(init_params),
-			Fminbox(BFGS(linesearch = LineSearches.BackTracking()));
-			autodiff = :forward
-		)
-		# loss offset is optimised loss - loss for true parameter values
-		println("loss offset = $(pyfmt(FMT_2DP, opt_res.minimum - true_loss))")
-		push!(res_vec, opt_res)
+# Create specific penalty function
+function make_penalty_func(penalty_str, hyp=nothing)
+	penalty_func = eval(Meta.parse(penalty_str * "_pen"));
+	if hyp === nothing
+		return x -> penalty_func(x)
+	else
+		return x -> penalty_func(x, hyp)
 	end
-
-	# Store estimated rate constants (each column of matrix is an optimisation run)
-	kmat = reduce(hcat, [itf.(r.minimizer) for r in res_vec]);
-	writedlm((@__DIR__) * "/output/$(OPT_DIR)/inferred_rates.txt", kmat);
-	@label after_opt
-end
-
-### Export visual results
-# Read in parameter estimates
-kmat = readdlm((@__DIR__) * "/output/$(OPT_DIR)/inferred_rates.txt");
-n_runs = size(kmat, 2);
-
-# Optimised value of loss function for each run
-optim_loss = optim_func.(eachcol(tf.(kmat)))
-ranked_order = sortperm(optim_loss);
-
-# Show heatmap of reaction rate constants for all runs
-f = Figure();
-ax = Axis(
-	f[1,1], 
-	title="Estimated rate constants for each run", 
-	xlabel="Reaction index", 
-	ylabel="Loss offset (relative to loss under true parameter values)",
-	yticks=(1:n_runs,pyfmt.(FMT_2DP, sort(optim_loss).-true_loss))
-);
-hm = heatmap!(kmat[:,ranked_order], colormap=:Blues);
-Colorbar(f[:, end+1], hm);
-# A bizzare hack to draw boxes that can appear on top of the axis spines
-true_rxs = Observable([18, 13, 1])
-rects_screenspace = lift(true_rxs, ax.finallimits, ax.scene.viewport) do xs, lims, pxa
-    rects = map(xs) do x
-		Rect(
-			pxa.origin[1] + pxa.widths[1]*(x-0.5-lims.origin[1])/lims.widths[1],
-			pxa.origin[2],
-			pxa.widths[1] / n_rx,
-			pxa.widths[2]	
-		)
-    end
-end
-boxes = poly!(ax.blockscene, rects_screenspace, color=(:white, 0.0), strokewidth=3)
-translate!(boxes, 0, 0, 100)
-f
-save((@__DIR__) * "/output/$(OPT_DIR)/inferred_rates_heatmap.png", f);
-
-# for col in eachcol(kmat)
-# 	display(extrema([k for k in col if k < 0.1]))
-# end
-
-bin_edges = 10 .^ range(-10, 2, 25);
-f = hist(
-	vec(kmat), bins=bin_edges, label="All runs"; 
-	axis=(;
-		:title=>"Histogram of estimated rate constants (aggregated over all reactions)", 
-		:xlabel=>"Estimated rate constants", 
-		:xscale=>log10,
-		:xticks=>LogTicks(LinearTicks(7)),
-	)
-)
-hist!(kmat[:,ranked_order[1]], bins=bin_edges, label="Best run")
-axislegend(position=:rt)
-ylims!(0., 32.);
-save((@__DIR__) * "/output/$(OPT_DIR)/inferred_rates_histogram.png", f);
-
-# Visualise estimated reaction rates and trajectories simulated from these rates
-t_grid = range(t_span..., 1001);
-for run_idx in 1:n_runs
-	kvec = kmat[:,run_idx]
-	loss_offset = pyfmt(FMT_2DP, optim_loss[run_idx] - true_loss)
-
-	local f = Figure()
-	title = "True and estimated reaction rate constants\n(Run $run_idx, loss offset = $loss_offset)"
-	local ax = Axis(f[1,1], title=title, xlabel="Reaction index", ylabel="Reaction rate constant")
-	scatter!(1:n_rx, true_kvec, alpha=0.7, label="Ground truth")
-	scatter!(1:n_rx, kvec, alpha=0.7, label="Estimated")
-	f[2, 1] = Legend(f, ax, orientation=:horizontal);
-	save((@__DIR__) * "/output/$(OPT_DIR)/inferred_rates_run$(run_idx).png", f)
-
-	est_oprob = remake(oprob, p=[k => kvec])
-	est_sol = solve(est_oprob);
-	sol_grid = sol(t_grid);
-	est_sol_grid = est_sol(t_grid);
-	local f = Figure()
-	title = "ODE trajectories (Run $run_idx, loss offset = $loss_offset)"
-	local ax = Axis(f[1,1], title=title, xlabel=L"t", ylabel="Concentration")
-	for i in 1:3
-		lines!(t_grid, [pt[i] for pt in sol_grid], color=palette[i], alpha = 0.8, label=L"True $X_%$i$")
-	end
-	for i in 1:3
-		lines!(t_grid, [pt[i] for pt in est_sol_grid], color=palette[i], linestyle=:dash, label=L"Est. $X_%$i$")
-	end
-	axislegend(position=:rc);
-	save((@__DIR__) * "/output/$(OPT_DIR)/inferred_trajs_run$(run_idx).png", f)
 end

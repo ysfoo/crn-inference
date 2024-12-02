@@ -1,8 +1,8 @@
 using CairoMakie
 using Colors
-using Format
 
-FMT_2DP = ".2f";
+using Format
+FMT_2DP = ".2f" # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
 
 # Plotting setup
 set_theme!(theme_latexfonts());
