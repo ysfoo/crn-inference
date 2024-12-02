@@ -4,7 +4,7 @@ Project during MATRIX program "Parameter Identifiability in Mathematical Biology
 
 Run `sim_data_script.jl` to create synthetic data. The ground truth CRN consists of the reactions
 
-![equation](https://latex.codecogs.com/png.image?\dpi{200}\bg{white}X_1\xrightarrow[]{k_{1}}X_2\quad\text{&space;and&space;}\quad&space;X_1&plus;X_2\overset{k_{18}}{\underset{k_{13}}\rightleftharpoons}X_3.)
+![equation](https://latex.codecogs.com/png.image?\dpi{110}\bg{white}X_1\xrightarrow[]{k_{1}}X_2\quad\text{&space;and&space;}\quad&space;X_1&plus;X_2\overset{k_{18}}{\underset{k_{13}}\rightleftharpoons}X_3.)
 
 The subscripts correspond to indices of a list of 30 candidate reactions as defined in `full_network.jl`; see `output/reactions.txt`. The default setup is to have all rate constants set to 1.0; these simulations are stored in `output/`. We also simulate other setups where the values $k_1$ and $k_{18}$ are varied; these simulations are stored in `output/vary_kvals/`.
 
