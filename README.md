@@ -8,7 +8,7 @@ Run `sim_data_script.jl` to create synthetic data. The ground truth CRN consists
 
 The subscripts correspond to indices of a list of 30 candidate reactions as defined in `full_network.jl`; see `output/reactions.txt`. The default setup is to have all rate constants set to 1.0; these simulations are stored in `output/`. We also simulate other setups where the values $k_1$ and $k_{18}$ are varied; these simulations are stored in `output/vary_kvals/`.
 
-Our aim is to infer the ground truth CRN from noisy time series data generated from `sim_data.jl`. This is done by estimating the rate constants of the 30 candidate reactions via a multi-start sparse optimisation approach. The key functions are implemented in `inference.jl`. A demonstration of the usage of these functions is given in `inference_single.jl`, which is designed to be run interactively line-by-line, e.g. in VS Code.
+Our aim is to infer the ground truth CRN from noisy time series data. This is done by estimating the rate constants of the 30 candidate reactions via a multi-start sparse optimisation approach. The key functions are implemented in `inference.jl`. A demonstration of the usage of these functions is given in `inference_single.jl`, which is designed to be run interactively line-by-line, e.g. in VS Code.
 
 ## Varying optimisation options
 
