@@ -37,12 +37,14 @@ Warning: There are currently around 10,000 images in this repository as a result
 We need numerical measures of performance that reflect trajectory reconstruction, parameter reconstruction, and network reconstruction.
 
 - *Trajectory reconstruction.* Let $x(t)$ be a trajectory on $t\in [0,T]$ simulated from ground truth parameters and $\hat{x}(t)$ be the corresponding trajectory simulated from estimated parameters. We numerically compute $\frac{1}{T}\int_0^T |\hat{x}(t)-x(t)| dt$ on some time grid as a measure of absolute trajectory reconstruction error.
-- *Parameter reconstruction.* Let $k$ be the rate constant of a reaction from the true system, and let $\hat{k}$ be the corresponding estimate. We use $\frac{\hat{k} - k}{k}$ as a relative parameter reconstruction error.
+- *Parameter reconstruction.* Let $k$ be the rate constant of a reaction from the true system, and let $\hat{k}$ be the corresponding estimate. We use $\frac{|\hat{k} - k|}{k}$ as a relative parameter reconstruction error.
 - *Network reconstruction.* Suppose we have a classification rule that decides which reactions are present based on the estimated rate constants. We can then apply the metrics used in binary classification, e.g. precision and recall.
 
 The metrics mentioned so far are most likely applied to the best optimisation run, i.e. the run which finds the lowest loss value. We define a basin of attraction metric as the proportion of runs that end with the same parameter values that result in this lowest loss value. Note that this lowest loss value is not guaranteed to be the global minimum. 
 
 We define a loss offset to be a loss value subtracted by the loss value evaluated with the true parameter values. If the loss offset of the best run is positive, then by definition, the local minimum found during optimisation is not the global minimum. On the other hand, the true parameter values are not guaranteed to correspond to the global minimum. It is possible for the loss offset of the best run to be negative and for the corresponding inferred network to not match the ground truth. If this happens across all penalty functions for a problem instance, then this problem may suffer from an identifiability issue. However, if this happens only for a particular penalty function, then this may hint at weaknesses of that penalty function.
+
+Finally, it would be interesting to note how well each penalty function encourages sparsity. Given that our optimisation approach fixes $10^{-10}$ as a lower bound for the parameters, if a parameter is estimated to be less than $2\times 10^{-10}$, we can essentially treat it as a zero. We define the sparsity fraction to be the proportion of reactions that have rate constant estimates less than $2\times 10^{-10}$ aggregated over all runs with a specific penalty function for a problem instance.
 
 ## Future work
 
