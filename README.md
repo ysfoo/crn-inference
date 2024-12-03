@@ -8,7 +8,7 @@ Run `sim_data_script.jl` to create synthetic data. The ground truth CRN consists
 
 The subscripts correspond to indices of a list of 30 candidate reactions as defined in `full_network.jl`; see `output/reactions.txt`. The default setup is to have all rate constants set to 1.0; these simulations are stored in `output/`. We also simulate other setups where the values $k_1$ and $k_{18}$ are varied; these simulations are stored in `output/vary_kvals/`.
 
-Our aim is to infer the ground truth CRN from noisy time series data. This is done by estimating the rate constants of the 30 candidate reactions via a multi-start sparse optimisation approach. The key functions are implemented in `inference.jl`. A demonstration of the usage of these functions is given in `inference_single.jl`, which is designed to be run interactively line-by-line, e.g. in VS Code.
+Our aim is to infer the ground truth CRN from noisy time series data. This is done by estimating the rate constants of the 30 candidate reactions via a multi-start sparse optimisation approach. Each run involves starting the optimisation algorithm from a random initial value. The loss function to be optimised is `loss_func` as defined at the end of `inference.jl`. The key functions used for optimisation are implemented also in `inference.jl`. A demonstration of the usage of these functions is given in `inference_single.jl`, which is designed to be run interactively line-by-line, e.g. in VS Code.
 
 ## Varying optimisation options
 
@@ -26,15 +26,32 @@ The images `inferred_rates_histogram.png` aggregate the estimated reaction rate 
 
 The images `inferred_rates_run[x].png` present a more detailed view of the estimated reaction rates (square root scale). Some of the local minima correspond to CRNs that are dynamically equivalent to the ground truth, e.g. the local minimum corresponding to `output/vary_opts/logL1_uselog/inferred_rates_run15.png` is explained by the fact that the reactions $X_3 \rightarrow X_1$ and $X_3 \rightarrow X_2 + X_3$ induce the same dynamics as the reaction $X_3 \rightarrow X_1 + X_2$ where when all these reactions share the same rate constants.
 
+## Varying penalty hyperparameters ground truth rate constants
+
+The hyperparameters of the penalty functions have been manually chosen (to be documented). We test the robustness of our optimisation results against changes to the penalty hyperparameters by either halving or doubling them. This is done for 25 sets of ground truth rate constants, where $k_{13}$ is fixed at $1.0$, whereas $k_1$ and $k_{18}$ take values from $(0.1, 0.3, 1.0, 3.0, 10.0)$. Given the results from the previous section, we only perform optimisation in the log space of the parameters.
+
+Warning: There are currently around 10,000 images in this repository as a result of this sensitivity analysis. We need to find a more efficient way of summarising these results.
+
+## Performance metrics
+
+We need numerical measures of performance that reflect trajectory reconstruction, parameter reconstruction, and network reconstruction.
+
+- *Trajectory reconstruction.* Let $x(t)$ be a trajectory on $t\in [0,T]$ simulated from ground truth parameters and $\hat{x}(t)$ be the corresponding trajectory simulated from estimated parameters. We numerically compute $\frac{1}{T}\int_0^T |\hat{x}(t)-x(t)| dt$ on some time grid as a measure of absolute trajectory reconstruction error.
+- *Parameter reconstruction.* Let $k$ be the rate constant of a reaction from the true system, and let $\hat{k}$ be the corresponding estimate. We use $\frac{\hat{k} - k}{k}$ as a relative parameter reconstruction error.
+- *Network reconstruction.* Suppose we have a classification rule that decides which reactions are present based on the estimated rate constants. We can then apply the metrics used in binary classification, e.g. precision and recall.
+
+The metrics mentioned so far are most likely applied to the best optimisation run, i.e. the run which finds the lowest loss value. We define a basin of attraction metric as the proportion of runs that end with the same parameter values that result in this lowest loss value. Note that this lowest loss value is not guaranteed to be the global minimum. 
+
+We define a loss offset to be a loss value subtracted by the loss value evaluated with the true parameter values. If the loss offset of the best run is positive, then by definition, the local minimum found during optimisation is not the global minimum. On the other hand, the true parameter values are not guaranteed to correspond to the global minimum. It is possible for the loss offset of the best run to be negative and for the corresponding inferred network to not match the ground truth. If this happens across all penalty functions for a problem instance, then this problem may suffer from an identifiability issue. However, if this happens only for a particular penalty function, then this may hint at weaknesses of that penalty function.
+
 ## Future work
 
 Things to do:
-- Sensitivity to penalty hyperparameter
-- Robustness of results against a variety of ground truth reaction rate constants
+- Summarise results
+- Automatic determination of rate constant cutoff (use largest gap between estimated rate constants in log space as the cutoff)
 
 Things I don't really want to do but are likely needed in practice:
 - Estimate noise SD (currently assumed to be known during inference)
 - Estimate initial conditions (currently assumed to be known during inference)
 - Handle multiple trajectories from different starting points
-- Automatic determination of rate constant cutoff
 - Automatic hyperparameter selection
