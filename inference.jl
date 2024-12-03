@@ -46,9 +46,9 @@ end
 # penalty_str : Choice of penalty function, one of < L1 | logL1 | approxL0 | hslike >
 # k           : Symbolics object for reaction rate constants, e.g. as defined in `full_network.jl`
 # lower_bound : Lower bound, e.g. 1e-10 to clip parameters away from 0 to prevent issues such as log(0)
-# log_opt     : Whether to perform optimisation in log space, default to true
 # pen_hyp     : Hyperparameter for penalty function
-function make_iprob(oprob, t_obs, data, penalty_str, lower_bound, k; log_opt=true, pen_hyp=nothing)
+# log_opt     : Whether to perform optimisation in log space, default to true
+function make_iprob(oprob, t_obs, data, penalty_str, lower_bound, k, pen_hyp; log_opt=true)
 	penalty_func = make_penalty_func(penalty_str, pen_hyp)
 	if log_opt
 		tf = u -> log(max(lower_bound, u))
@@ -119,7 +119,7 @@ function make_plots(iprob, kmat, true_kvec, k, dirname)
 	# Loss function evaluated for the ground truth parameters
 	true_loss = iprob.optim_func(iprob.tf.(true_kvec))
 
-	# 1. Heatmap of estimated rate constants (all runs on same plot)
+	# 1. Heatmap of estimated rate constants, clipped at 20.0 (all runs on same plot)
 	f = Figure();
 	ax = Axis(
 		f[1,1], 
@@ -128,12 +128,12 @@ function make_plots(iprob, kmat, true_kvec, k, dirname)
 		ylabel="Loss offset (relative to loss under true rate constants)",
 		yticks=(1:n_runs, pyfmt.(FMT_2DP, optim_loss[ranked_order].-true_loss))
 	);
-	hm = heatmap!(kmat[:,ranked_order], colormap=:Blues);
-	Colorbar(f[:, end+1], hm);
+	hm = heatmap!(min.(20., kmat[:,ranked_order]), colormap=:Blues, colorscale=sqrt)
+	Colorbar(f[:, end+1], hm, ticks=sqrt_ticks(min(20., maximum(kmat))))
 	# A bizzare hack to draw boxes to appear on top of the axis spines for aesthetic reasons
 	true_rxs = Observable(findall(>(0.), true_kvec))
 	rects_screenspace = lift(true_rxs, ax.finallimits, ax.scene.viewport) do xs, lims, pxa
-		rects = map(xs) do x
+		map(xs) do x
 			Rect(
 				pxa.origin[1] + pxa.widths[1]*(x-0.5-lims.origin[1])/lims.widths[1],
 				pxa.origin[2],
@@ -169,10 +169,13 @@ function make_plots(iprob, kmat, true_kvec, k, dirname)
 		loss_offset = pyfmt(FMT_2DP, optim_loss[run_idx] - true_loss)	
 		f = Figure()
 		title = "True and estimated reaction rate constants\n(Run $run_idx, loss offset = $loss_offset)"
-		ax = Axis(f[1,1], title=title, xlabel="Reaction index", ylabel="Reaction rate constant")
+		ax = Axis(
+			f[1,1], title=title, xlabel="Reaction index", ylabel="Reaction rate constant", 
+			yscale=symsqrt, yticks=sqrt_ticks(maximum([true_kvec; kvec]))
+		)
 		scatter!(1:n_rx, true_kvec, alpha=0.7, label="Ground truth")
 		scatter!(1:n_rx, kvec, alpha=0.7, label="Estimated")
-		f[2, 1] = Legend(f, ax, orientation=:horizontal);
+		f[2, 1] = Legend(f, ax, orientation=:horizontal);		
 		save(joinpath(dirname, "inferred_rates_run$(run_idx).png"), f)
 	end
 
@@ -215,25 +218,24 @@ end
 # Penalty functions on parameters
 # Some of these can be interpreted as the negative log density of some prior distribution
 # Increasing the hyperparameter `hyp` penalises model complexity more heavily
-function L1_pen(x, hyp=1e2) # Exponential(scale = 1/hyp)
+function L1_pen(x, hyp) # Exponential(scale = 1/hyp)
 	hyp*x
 end
-function logL1_pen(x, hyp=1.0) # Exponential(scale = 1/hyp) for log rates
+function logL1_pen(x, hyp) # Exponential(scale = 1/hyp) for log rates
 	hyp*log(x)
 end
-function approxL0_pen(x, hyp=1.0) # hyp * no of params, which is approximated by x^0.1
+function approxL0_pen(x, hyp) # hyp * no of params, which is approximated by x^0.1
 	hyp*x^0.1
 end
-function hslike_pen(x, hyp=1e2) # horseshoe-like prior, scale = 1/hyp
+function hslike_pen(x, hyp) # horseshoe-like prior, scale = 1/hyp
 	-log(log(1 + abs2(1/(hyp*x))))
 end
 
 # Create specific penalty function
-function make_penalty_func(penalty_str, hyp=nothing)
+function make_penalty_func(penalty_str, hyp)
 	penalty_func = eval(Meta.parse(penalty_str * "_pen"));
-	if hyp === nothing
-		return x -> penalty_func(x)
-	else
-		return x -> penalty_func(x, hyp)
-	end
+	return x -> penalty_func(x, hyp)
 end
+
+
+

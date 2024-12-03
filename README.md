@@ -20,16 +20,15 @@ We explore two optimisation options in `inference_vary_opts.jl`, with results st
 
 The images `inferred_trajs_run[x].png` show whether the trajectories reconstructed from estimated parameters follow the ground truth closely. The reconstruction is consistently accurate for all penalty functions when optimisation is performed on the log scale. Reconstruction quality is inconsistent when optimisation is performed on the log scale for all penalty functions except the $L_1$ penalty.
 
-The images `inferred_rates_heatmap.png` summarise estimated reaction rate constants. Note that the reactions in the ground truth network are outlined in boxes. For the current experiment, the $L_1$ penalty function results in the most consistent reconstruction of the ground truth rate constants (i.e. finding the global minimum). Under the other penalty functions, the optimiser sometimes finds local minima, which are especially poor when optimisation is not performed on the log scale. However, from experience, the good performance of the $L_1$ penalty function here is sensitive to the penalty hyperparameter and the ground truth rate constants &mdash; more sensitvity analysis is needed (for all penalty functions).
+The images `inferred_rates_heatmap.png` summarise estimated reaction rate constants (clipped at 20.0, square root scale for colour). Note that the reactions in the ground truth network are outlined in boxes. For the current experiment, the $L_1$ penalty function results in the most consistent reconstruction of the ground truth rate constants (i.e. finding the global minimum). Under the other penalty functions, the optimiser sometimes finds local minima, which are especially poor when optimisation is not performed on the log scale. However, from experience, the good performance of the $L_1$ penalty function here is sensitive to the penalty hyperparameter and the ground truth rate constants &mdash; more sensitvity analysis is needed (for all penalty functions).
 
-The images `inferred_rates_histogram.png` aggregate the estimated reaction rate constants over reactions and runs. In order to infer which reactions are present in the system, we need to choose a cutoff value. The $L_1$ penalty function on the shifted-log scale leads to the clearest separation of negligible and non-negligible rate constants. Other penalty functions require a more subjective choice of a cutoff value, especially for the $L_1$ penalty function (on the original scale). This suggests that different penalty functions differ in the tradeoff between the ease of the finding the global minimum and a clear separation of negligible and non-negligible rate constants at the minima found.
+The images `inferred_rates_histogram.png` aggregate the estimated reaction rate constants over reactions and runs (y-axis clipped at 32). In order to infer which reactions are present in the system, we need to choose a cutoff value. The $L_1$ penalty function on the shifted-log scale leads to the clearest separation of negligible and non-negligible rate constants. Other penalty functions require a more subjective choice of a cutoff value, especially for the $L_1$ penalty function (on the original scale). This suggests that different penalty functions differ in the tradeoff between the ease of the finding the global minimum and a clear separation of negligible and non-negligible rate constants at the minima found.
 
-The images `inferred_rates_run[x].png` present a more detailed view of the estimated reaction rates. Some of the local minima correspond to CRNs that are dynamically equivalent to the ground truth, e.g. the local minimum corresponding to `output/vary_opts/logL1_uselog/inferred_rates_run15.png` is explained by the fact that the reactions $X_3 \rightarrow X_1$ and $X_3 \rightarrow X_2 + X_3$ induce the same dynamics as the reaction $X_3 \rightarrow X_1 + X_2$ where when all these reactions share the same rate constants.
+The images `inferred_rates_run[x].png` present a more detailed view of the estimated reaction rates (square root scale). Some of the local minima correspond to CRNs that are dynamically equivalent to the ground truth, e.g. the local minimum corresponding to `output/vary_opts/logL1_uselog/inferred_rates_run15.png` is explained by the fact that the reactions $X_3 \rightarrow X_1$ and $X_3 \rightarrow X_2 + X_3$ induce the same dynamics as the reaction $X_3 \rightarrow X_1 + X_2$ where when all these reactions share the same rate constants.
 
 ## Future work
 
 Things to do:
-- Automatic determination of reaction rate cutoff
 - Sensitivity to penalty hyperparameter
 - Robustness of results against a variety of ground truth reaction rate constants
 
@@ -37,4 +36,5 @@ Things I don't really want to do but are likely needed in practice:
 - Estimate noise SD (currently assumed to be known during inference)
 - Estimate initial conditions (currently assumed to be known during inference)
 - Handle multiple trajectories from different starting points
+- Automatic determination of rate constant cutoff
 - Automatic hyperparameter selection

@@ -1,0 +1,8 @@
+unused/
+
+# HPC files
+*.slurm
+slurm*
+
+# Bash scripts
+*.sh

@@ -1,0 +1,15 @@
+Run 1: 5.85 seconds, loss offset = 2.22
+Run 2: 4.88 seconds, loss offset = 11.36
+Run 3: 5.77 seconds, loss offset = 2.35
+Run 4: 4.64 seconds, loss offset = -0.67
+Run 5: 9.04 seconds, loss offset = 3.73
+Run 6: 3.49 seconds, loss offset = 14.03
+Run 7: 9.82 seconds, loss offset = 2.19
+Run 8: 4.34 seconds, loss offset = 11.39
+Run 9: 5.69 seconds, loss offset = 8.86
+Run 10: 5.93 seconds, loss offset = 2.51
+Run 11: 4.83 seconds, loss offset = 6.77
+Run 12: 6.80 seconds, loss offset = 1.91
+Run 13: 5.93 seconds, loss offset = 1.59
+Run 14: 8.79 seconds, loss offset = 0.79
+Run 15: 8.20 seconds, loss offset = 2.96

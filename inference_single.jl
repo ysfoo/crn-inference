@@ -3,7 +3,7 @@
 ############################################
 
 using Format
-FMT_2DP = ".2f" # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
+FMT_2DP = ".2f"; # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
 
 include(joinpath(@__DIR__, "full_network.jl")); # defines `full_network` and `k` (Symbolics object for rate constants)
 include(joinpath(@__DIR__, "inference.jl")); # imports key functions
@@ -35,21 +35,24 @@ sol.u[end] # final point for trajectory simulated from full model
 data[:,end] # final data point (noisy), should be similar to above
 
 
-### Optimisation setup
+### Optimisation
 PEN_STR = "L1"; # one of < L1 | logL1 | approxL0 | hslike >, see end of `inference.jl` for details about penalty functions
 LOG_OPT = true; # whether to perform optimisation in log space of parameters
-PEN_HYP = nothing; # leave as nothing to use default hyperparameter
-if PEN_STR == "approxL0"
-    PEN_HYP = log(n_obs) / 2; # BIC-inspired hyparameter for the approxL0 penalty function
-end
+HYP_DICT = Dict(
+	"L1" => 20., 
+	"logL1" => 1., 
+	"approxL0" => log(length(data)),
+	"hslike" => 20.
+);
+pen_hyp = HYP_DICT[PEN_STR];
 OPT_DIRNAME = joinpath(@__DIR__, "output/vary_opts", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing optimisation results
 mkpath(OPT_DIRNAME);
 N_RUNS = 15; # number of optimisation runs
 
-init_vec = rand_inits(N_RUNS, n_rx, 2024); # Vector of random initial points for optimisation runs
+init_vec = rand_inits(N_RUNS, n_rx, 1); # Vector of random initial points for optimisation runs
 
 # Create ODEInferenceProb struct, see `inference.jl` for documentation of fields
-iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k; log_opt=LOG_OPT, pen_hyp=PEN_HYP);
+iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k, pen_hyp; log_opt=LOG_OPT);
 
 # Large loss value when evaluated with incorrect rate constants (all 1s)
 iprob.optim_func(iprob.tf.(ones(n_rx))) # `iprob.tf` accounts for a potential log transform when `LOG_OPT == true`
@@ -68,18 +71,25 @@ function optim_callback(i, res)
     flush(stdout)
 end
 
-
-### Perform multi-start optimisation
-out_file = open(joinpath(OPT_DIRNAME, "optim_progress.txt"), "w"); # file for outputting optimisation progress
-res_vec = redirect_stdout(out_file) do
-    optim_iprob(iprob, lbs, ubs, init_vec; callback_func=optim_callback)
-end;
-close(out_file)
+# Perform multi-start optimisation
+res_vec = optim_iprob(iprob, lbs, ubs, init_vec; callback_func=optim_callback);
 
 # Export estimated reaction rates
 export_estimates(res_vec, iprob, OPT_DIRNAME, "inferred_rates.txt");
 
 
-### Visualise results
-kmat = readdlm(joinpath(OPT_DIRNAME, "inferred_rates.txt")); # read in reactions rates
+# Read in reactions rates
+kmat = readdlm(joinpath(OPT_DIRNAME, "inferred_rates.txt"));
+# Visualise results
 make_plots(iprob, kmat, true_kvec, k, OPT_DIRNAME);
+
+
+### Report errors
+true_rx = findall(>(0.0), true_kvec);
+
+optim_loss = iprob.optim_func.(eachcol(iprob.tf.(kmat)));
+kvec = kmat[:,argmin(optim_loss)];
+# sum of errors for truly present reactions
+sum(abs.(kvec[true_rx] .- true_kvec[true_rx]))
+# sum of false positive reaction rates
+sum(kvec) - sum(kvec[true_rx])

@@ -2,7 +2,7 @@
 ## Ground truth rate constants are all 1.0
 
 using Format
-FMT_2DP = ".2f" # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
+FMT_2DP = ".2f"; # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
 
 include(joinpath(@__DIR__, "full_network.jl")); # defines `full_network` and `k` (Symbolics object for rate constants)
 include(joinpath(@__DIR__, "inference.jl")); # imports key functions
@@ -29,19 +29,26 @@ n_obs = length(t_obs);
 
 # Optimisation setup
 N_RUNS = 15; # number of optimisation runs
-init_vec = rand_inits(N_RUNS, n_rx, 2024); # Vector of random initial points for optimisation runs
+init_vec = rand_inits(N_RUNS, n_rx, 1); # Vector of random initial points for optimisation runs
 
 # All possible optimisation options
 opt_options = Iterators.product(["L1", "logL1", "approxL0", "hslike"], [true, false]);
 
+HYP_DICT = Dict(
+	"L1" => 20.0, 
+	"logL1" => 1.0, 
+	"approxL0" => log(length(data)), 
+	"hslike" => 20.0
+);
+
 # Perform multi-start optimisation and export reaction rates
 # Comment out this block if optimisation is already performed (e.g. when redoing plots)
 Threads.@threads for (PEN_STR, LOG_OPT) in collect(opt_options)
-	PEN_HYP = PEN_STR == "approxL0" ? log(n_obs) / 2 : nothing;
 	OPT_DIRNAME = joinpath(@__DIR__, "output/vary_opts", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing results
 	mkpath(OPT_DIRNAME);
 
-	iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k; log_opt=LOG_OPT, pen_hyp=PEN_HYP)
+	pen_hyp = HYP_DICT[PEN_STR]
+	iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k, pen_hyp; log_opt=LOG_OPT)
 	true_loss = iprob.optim_func(iprob.tf.(true_kvec))
 
 	open(joinpath(OPT_DIRNAME, "optim_progress.txt"), "w") do io
@@ -59,10 +66,10 @@ end
 
 # Visualise results (no multi-threading as plotting is not thread-safe, boo!)
 for (PEN_STR, LOG_OPT) in collect(opt_options)
-	PEN_HYP = PEN_STR == "approxL0" ? log(n_obs) / 2 : nothing;
 	OPT_DIRNAME = joinpath(@__DIR__, "output/vary_opts", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing results
 
-	iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k; log_opt=LOG_OPT, pen_hyp=PEN_HYP)
+	pen_hyp = HYP_DICT[PEN_STR]
+	iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k, pen_hyp; log_opt=LOG_OPT)
 
 	kmat = readdlm(joinpath(OPT_DIRNAME, "inferred_rates.txt"));
 	make_plots(iprob, kmat, true_kvec, k, OPT_DIRNAME);
