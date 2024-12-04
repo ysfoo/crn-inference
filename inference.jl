@@ -119,7 +119,7 @@ function make_plots(iprob, kmat, true_kvec, k, dirname)
 	# Loss function evaluated for the ground truth parameters
 	true_loss = iprob.optim_func(iprob.tf.(true_kvec))
 
-	# 1. Heatmap of estimated rate constants, clipped at 20.0 (all runs on same plot)
+	# 1. Heatmap of estimated rate constants (all runs on same plot)
 	f = Figure();
 	ax = Axis(
 		f[1,1], 
@@ -128,8 +128,16 @@ function make_plots(iprob, kmat, true_kvec, k, dirname)
 		ylabel="Loss offset (relative to loss under true rate constants)",
 		yticks=(1:n_runs, pyfmt.(FMT_2DP, optim_loss[ranked_order].-true_loss))
 	);
-	hm = heatmap!(min.(20., kmat[:,ranked_order]), colormap=:Blues, colorscale=sqrt)
-	Colorbar(f[:, end+1], hm, ticks=sqrt_ticks(min(20., maximum(kmat))))
+	if maximum(kmat) > 1.5*maximum(true_kvec)
+		hm = heatmap!(
+			kmat[:,ranked_order], colormap=:Blues, colorscale=sqrt, 
+			highclip=:black, colorrange=(0, 1.5*maximum(true_kvec)),
+		)		
+	else
+		hm = heatmap!(kmat[:,ranked_order], colormap=:Blues, colorscale=sqrt)		
+	end
+	Colorbar(f[:, end+1], hm, ticks=sqrt_ticks(min(1.5*maximum(true_kvec), maximum(kmat))))
+	
 	# A bizzare hack to draw boxes to appear on top of the axis spines for aesthetic reasons
 	true_rxs = Observable(findall(>(0.), true_kvec))
 	rects_screenspace = lift(true_rxs, ax.finallimits, ax.scene.viewport) do xs, lims, pxa

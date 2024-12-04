@@ -1,5 +1,7 @@
 using CairoMakie
 using Colors
+using ColorSchemes
+using MathTeXEngine
 
 using Format
 FMT_2DP = ".2f" # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points

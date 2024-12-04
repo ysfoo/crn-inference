@@ -43,15 +43,15 @@ HYP_DICT = Dict(
 
 # Perform multi-start optimisation and export reaction rates
 # Comment out this block if optimisation is already performed (e.g. when redoing plots)
-Threads.@threads for (PEN_STR, LOG_OPT) in collect(opt_options)
-	OPT_DIRNAME = joinpath(@__DIR__, "output/vary_opts", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing results
-	mkpath(OPT_DIRNAME);
+Threads.@threads for (pen_str, log_opt) in collect(opt_options)
+	opt_dirname = joinpath(@__DIR__, "output/vary_opts", pen_str * "_" * (log_opt ? "uselog" : "nolog")) # directory for storing results
+	mkpath(opt_dirname);
 
-	pen_hyp = HYP_DICT[PEN_STR]
-	iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k, pen_hyp; log_opt=LOG_OPT)
+	pen_hyp = HYP_DICT[pen_str]
+	iprob = make_iprob(oprob, t_obs, data, pen_str, LB, k, pen_hyp; log_opt=log_opt)
 	true_loss = iprob.optim_func(iprob.tf.(true_kvec))
 
-	open(joinpath(OPT_DIRNAME, "optim_progress.txt"), "w") do io
+	open(joinpath(opt_dirname, "optim_progress.txt"), "w") do io
 		function optim_callback(i, res)
 			time_str = pyfmt(FMT_2DP, res.time_run)
 			# loss offset = diff b/w the local minimum found and the loss evaluated at the ground truth rate constants
@@ -60,17 +60,17 @@ Threads.@threads for (PEN_STR, LOG_OPT) in collect(opt_options)
 			flush(io)
 		end
 		res_vec = optim_iprob(iprob, lbs, ubs, init_vec; callback_func=optim_callback)
-		export_estimates(res_vec, iprob, OPT_DIRNAME, "inferred_rates.txt");
+		export_estimates(res_vec, iprob, opt_dirname, "inferred_rates.txt");
 	end
 end
 
 # Visualise results (no multi-threading as plotting is not thread-safe, boo!)
-for (PEN_STR, LOG_OPT) in collect(opt_options)
-	OPT_DIRNAME = joinpath(@__DIR__, "output/vary_opts", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing results
+for (pen_str, log_opt) in collect(opt_options)
+	opt_dirname = joinpath(@__DIR__, "output/vary_opts", pen_str * "_" * (log_opt ? "uselog" : "nolog")) # directory for storing results
 
-	pen_hyp = HYP_DICT[PEN_STR]
-	iprob = make_iprob(oprob, t_obs, data, PEN_STR, LB, k, pen_hyp; log_opt=LOG_OPT)
+	pen_hyp = HYP_DICT[pen_str]
+	iprob = make_iprob(oprob, t_obs, data, pen_str, LB, k, pen_hyp; log_opt=log_opt)
 
-	kmat = readdlm(joinpath(OPT_DIRNAME, "inferred_rates.txt"));
-	make_plots(iprob, kmat, true_kvec, k, OPT_DIRNAME);
+	kmat = readdlm(joinpath(opt_dirname, "inferred_rates.txt"));
+	make_plots(iprob, kmat, true_kvec, k, opt_dirname);
 end
