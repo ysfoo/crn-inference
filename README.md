@@ -28,13 +28,13 @@ The images `inferred_rates_run[x].png` present a more detailed view of the estim
 
 ## Varying penalty hyperparameters ground truth rate constants
 
-The hyperparameters of the penalty functions have been manually chosen (to be documented). We test the robustness of our optimisation results against changes to the penalty hyperparameters by either halving or doubling them. This is done for 25 sets of ground truth rate constants, where $k_{13}$ is fixed at $1.0$, whereas $k_1$ and $k_{18}$ take values from $(0.1, 0.3, 1.0, 3.0, 10.0)$. Given the results from the previous section, we only perform optimisation in the log space of the parameters.
+The hyperparameters of the penalty functions have been manually chosen (to be documented). We test the robustness of our optimisation results against changes to the penalty hyperparameters by either halving or doubling them. This is done for 25 sets of ground truth rate constants, where $k_{13}$ is fixed at $1.0$, whereas $k_1$ and $k_{18}$ take values from $(0.1, 0.3, 1.0, 3.0, 10.0)$. Given the results from the previous section, we only perform optimisation in the log space of the parameters. 
 
 Warning: There are currently around 10,000 images in this repository as a result of this sensitivity analysis. We need to find a more efficient way of summarising these results.
 
 ## Performance metrics
 
-We need numerical measures of performance that reflect trajectory reconstruction, parameter reconstruction, and network reconstruction.
+We need numerical measures of performance that reflect trajectory reconstruction, parameter reconstruction, and network reconstruction. Some of these results can be found in `eval_figs/`.
 
 - *Trajectory reconstruction.* Let $x(t)$ be a trajectory on $t\in [0,T]$ simulated from ground truth parameters and $\hat{x}(t)$ be the corresponding trajectory simulated from estimated parameters. We numerically compute $\frac{1}{T}\int_0^T |\hat{x}(t)-x(t)| dt$ on some time grid as a measure of absolute trajectory reconstruction error.
 - *Parameter reconstruction.* Let $k$ be the rate constant of a reaction from the true system, and let $\hat{k}$ be the corresponding estimate. We use $\frac{|\hat{k} - k|}{k}$ as a relative parameter reconstruction error.
