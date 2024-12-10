@@ -1,6 +1,6 @@
-#####################################################################
-### Define ground truth network and functions for data simulation ###
-#####################################################################
+#####################################
+### Functions for data simulation ###
+#####################################
 
 using Catalyst
 using OrdinaryDiffEq
@@ -11,30 +11,16 @@ using DelimitedFiles
 
 include(joinpath(@__DIR__, "plot_helper.jl"));
 
-# Indices of reaction rate constants follow the reaction indices in full_network.jl
-default_rn = @reaction_network begin
-	k1, X1 --> X2
-	(k18, k13), X1 + X2 <--> X3	
-end
-default_rn = complete(default_rn);
-
-default_kmap  = (:k1 => 1., :k18 => 1., :k13 => 1.); # reaction rate constants
-default_x0map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # initial conditions
-default_t_span = (0., 10.); # time interval to solve on
-
 # Simulates and exports data
-# n_obs   : Number of observation points
-# σ       : Noise standard deviation
 # rn      : Reaction network, which is a Catalyst.ReactionSystem
 # kmap    : Dictionary mapping reaction rate symbols to their values
 # x0map   : Dictionary mapping species symbols to their initial concentrations
 # t_span  : Timespan for ODE problem
+# n_obs   : Number of observation points
+# σ       : Noise standard deviation
 # dirname : Directory name to store simulated data
-function sim_data(;
-	n_obs=101, σ = 0.01,
-	rn=default_rn, kmap=default_kmap, x0map=default_x0map, t_span=default_t_span, 
-	dirname=joinpath(@__DIR__, "output"), seed=nothing
-)
+# seed    : Random seed
+function sim_data(rn, kmap, x0map, t_span, n_obs, σ, dirname, seed=nothing)
 	n_species = length(x0map)
 	oprob = ODEProblem(rn, x0map, t_span, kmap);
 	sol = solve(oprob, saveat=range(t_span..., 1001)); # ODE solution

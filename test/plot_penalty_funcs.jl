@@ -1,5 +1,10 @@
-include(joinpath(@__DIR__, "inference.jl")); # imports key functions
-include(joinpath(@__DIR__, "plot_helper.jl"));
+################################################################################################
+### Define ground truth reaction network and the reaction network library used for inference ###
+################################################################################################
+
+SRC_DIR = joinpath(@__DIR__, "../src");
+include(joinpath(SRC_DIR, "inference.jl")); # imports penalty functions
+include(joinpath(SRC_DIR, "plot_helper.jl"));
 
 xs = 10 .^ range(-10, 2, 1001);
 L1_vals = L1_pen.(xs, 20.) .- L1_pen(1e-10, 20.);
@@ -20,4 +25,4 @@ xlims!(1e-10, 1e2);
 ylims!(-1., 26);
 axislegend(position=:lt);
 f
-save(joinpath(@__DIR__, "output/penalty_funcs.png"), f)
+save(joinpath(@__DIR__, "penalty_funcs.png"), f)
