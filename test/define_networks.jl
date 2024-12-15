@@ -1,5 +1,5 @@
 ################################################################################################
-### Define ground truth reaction network and the reaction network library used for inference ###
+### Define ground truth reaction network and the reaction library network used for inference ###
 ################################################################################################
 
 using Catalyst
@@ -25,12 +25,14 @@ rx_vec = [
 @named full_network = ReactionSystem(rx_vec, t)
 full_network = complete(full_network)
 
-# Export reaction list (uncomment to run) TODO: comment the following
-out_file = open(joinpath(@__DIR__, "reactions.txt"), "w");
-redirect_stdout(out_file) do
-    println.(rx_vec);
-end;
-close(out_file)
+# Export reaction list
+function export_reaction_vec(rx_vec, filename=joinpath(@__DIR__, "reactions.txt"))
+	out_file = open(filename, "w");
+	redirect_stdout(out_file) do
+		println.(rx_vec);
+	end;
+	close(out_file)
+end
 
 
 ### Define true CRN (used for data simulation and inference evaluation)

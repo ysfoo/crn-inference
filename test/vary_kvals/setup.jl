@@ -10,7 +10,6 @@ FMT_2DP = ".2f"; # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with
 
 include(joinpath(@__DIR__, "../define_networks.jl")); # defines `full_network` and `k` (Symbolics object for rate constants)
 
-
 # Known quantities
 x0map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # assume initial conditions are known
 n_obs = 101; # number of time points
@@ -30,8 +29,14 @@ ubs = UB .* ones(n_rx);
 
 N_RUNS = 15; # number of optimisation runs
 
-# All possible optimisation options
-opt_options = Iterators.product(["L1", "logL1", "approxL0", "hslike"], [true, false]);
+# All possible settings
+k1_choice = [0.1, 0.3, 1., 3., 10.];
+k18_choice = [0.1, 0.3, 1., 3., 10.];
+pen_choice = ["L1", "logL1", "approxL0", "hslike"]; # penalty_function
+hyp_choice = ["half_hyps", "orig_hyps", "double_hyps"] # hyperparameter values (relative to default)
+settings_vec = collect(Iterators.product(
+    k1_choice, k18_choice, pen_choice, hyp_choice
+));
 
 # Default hyperparameter values
 HYP_DICT = Dict(
@@ -41,14 +46,11 @@ HYP_DICT = Dict(
 	"hslike" => 20.0 # manually chosen
 );
 
-# Define ground truth
-true_kvec = zeros(n_rx);
-true_kvec[1] = true_kvec[18] = true_kvec[13] = 1.; # ground truth reaction rate constants
-
+# Multipliers for varying hyperparameter values
+MULT_DICT = Dict("half_hyps" => 0.5, "orig_hyps" => 1.0, "double_hyps" => 2.0);
 
 # Helper functions
 
-# Read in data
 function read_data(data_dir, data_fname="data.txt")
 	fullmat = readdlm(joinpath(data_dir, data_fname));
 	t_obs = fullmat[:,1];
@@ -56,8 +58,23 @@ function read_data(data_dir, data_fname="data.txt")
 	return t_obs, data # NB: `data` is a matrix of dimensions n_species * n_obs
 end
 
-# Directory name for where optimisation results are stored
-function get_opt_dir(pen_str, log_opt)
-	return joinpath(@__DIR__, "output", pen_str * "_" * (log_opt ? "uselog" : "nolog"))
+function get_data_dir(k1, k18)
+    k1_str = pyfmt(".0e", k1)
+    k18_str = pyfmt(".0e", k18)
+    return joinpath(@__DIR__, "output/k1_$(k1_str)_k18_$(k18_str)")
 end
 
+function get_opt_dir(k1, k18, pen_str, hyp_str)
+    data_dir = get_data_dir(k1, k18)
+    joinpath(data_dir, hyp_str, pen_str * "_uselog")
+end
+
+function make_true_kvec(k1, k18)
+    true_kvec = zeros(n_rx);
+    true_kvec[1] = k1; true_kvec[18] = k18; true_kvec[13] = 1.;
+    return true_kvec
+end
+
+function get_hyp(pen_str, hyp_str)
+    return HYP_DICT[pen_str] * MULT_DICT[hyp_str]
+end

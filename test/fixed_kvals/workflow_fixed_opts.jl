@@ -1,6 +1,6 @@
-################################################################
-### Perform inference for a single setup and produce results ###
-################################################################
+###################################################################
+### Perform inference for a single instance and produce results ###
+###################################################################
 
 using DelimitedFiles
 using Random
@@ -9,8 +9,8 @@ using Format
 FMT_2DP = ".2f"; # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
 
 include(joinpath(@__DIR__, "../define_networks.jl")); # defines `full_network` and `k` (Symbolics object for rate constants)
-include(joinpath(@__DIR__, "../../src/inference.jl")); # imports key functions
-# Key functions imported: make_iprob, optim_iprob, export_estimates, make_plots
+include(joinpath(@__DIR__, "../../src/inference.jl")); # imports functions used for inference
+include(joinpath(@__DIR__, "../evaluation.jl")); # imports functions used for results
 
 ### Setup
 σ = 0.01; # assume noise SD is known
@@ -54,8 +54,8 @@ HYP_DICT = Dict(
 );
 
 pen_hyp = HYP_DICT[PEN_STR];
-OPT_DIRNAME = joinpath(@__DIR__, "output", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing optimisation results
-mkpath(OPT_DIRNAME); # create directory 
+OPT_DIR = joinpath(@__DIR__, "output", PEN_STR * "_" * (LOG_OPT ? "uselog" : "nolog")) # directory for storing optimisation results
+mkpath(OPT_DIR); # create directory 
 N_RUNS = 15; # number of optimisation runs
 
 # Random initial points for optimisation runs
@@ -87,21 +87,21 @@ end
 res_vec = optim_iprob(iprob, lbs, ubs, init_vec; callback_func=optim_callback);
 
 # Export estimated reaction rates
-export_estimates(res_vec, iprob, OPT_DIRNAME, "inferred_rates.txt");
+export_estimates(res_vec, iprob, OPT_DIR, "inferred_rates.txt");
 
 
 # Read in reactions rates
-kmat = readdlm(joinpath(OPT_DIRNAME, "inferred_rates.txt"));
+kmat = readdlm(joinpath(OPT_DIR, "inferred_rates.txt"));
 # Visualise results
-make_plots(iprob, kmat, true_kvec, k, OPT_DIRNAME);
+make_plots_runs(iprob, kmat, true_kvec, k, OPT_DIR);
 
 
 ### Report errors
 true_rx = findall(>(0.0), true_kvec);
 optim_loss = iprob.optim_func.(eachcol(iprob.tf.(kmat))); # optimised loss value for each run
-kvec = kmat[:,argmin(optim_loss)]; # rate constants for best run
+est_kvec = kmat[:,argmin(optim_loss)]; # rate constants for best run
 
 # sum of errors for truly present reactions
-sum(abs.(kvec[true_rx] .- true_kvec[true_rx]))
+sum(abs.(est_kvec[true_rx] .- true_kvec[true_rx]))
 # sum of all other reaction rates
-sum(kvec) - sum(kvec[true_rx])
+sum(est_kvec) - sum(est_kvec[true_rx])
