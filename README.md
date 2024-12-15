@@ -18,8 +18,8 @@ Our approach shares some similarities to that of [Hoffmann et al. (2019)](https:
 
 Deciding whether a reaction rate constant estimate is negligible or not is often done subjectively, e.g. in Hoffmann et al. (2019), a cutoff is manually chosen by visual inspection. We propose the following procedure for cutoff determination, which we implement in `src/inference.jl`:
 
-1. Given $R$ candidate reactions with their rate constant estimates, sort the estimates in ascending order, and denote the result as $\hat{k}_{(1)}, \ldots, \hat{k}_{(R)}$.
-2. Compute the ratios of consecutive rate constant estimates, i.e. $\hat{k}_{(j)} / \hat{k}_{(j-1)}$ for $j=2,\ldots,R$.
-3. Suppose that $\hat{k}_{(j')} / \hat{k}_{(j'-1)}$ is the maximum of these ratios. The reactions corresponding to $\hat{k}_{(j')}, \hat{k}_{(j'+1)} \ldots, \hat{k}_{(R)}$ are deduced to be present in the network, i.e. the reaction with rate constant estimates at least $\hat{k}_{(j')}$.
+1. Given $R$ candidate reactions with their rate constant estimates, sort the estimates in ascending order, and denote the result as $\hat{k}\_{(1)}, \ldots, \hat{k}\_{(R)}$.
+2. Compute the ratios of consecutive rate constant estimates, i.e. $\hat{k}\_{(j)} / \hat{k}\_{(j-1)}$ for $j=2,\ldots,R$.
+3. Suppose that $\hat{k}\_{(j')} / \hat{k}\_{(j'-1)}$ is the maximum of these ratios. The reactions corresponding to $\hat{k}\_{(j')}, \hat{k}\_{(j'+1)} \ldots, \hat{k}\_{(R)}$ are deduced to be present in the network, i.e. the reaction with rate constant estimates at least $\hat{k}\_{(j')}$.
 
 For our case study, we find that this automated cutoff determination performs sufficiently well when the shifted-log scale $L_1$ penalty is used; see `test/vary_kvals/README.md`.
