@@ -1,6 +1,8 @@
+We test our method for different optimisation settings, using one dataset where all ground truth rate constants are $1.0$. Specifically, we compare the penalty functions in `../README.md`, and also investigate how optimising on the log scale affects the results.
+
 ## File descriptions
 
-- `data.jl`: Script for simulating synthetic data based on the ground truth network; all reaction rate constants fixed at $1.0$.
+- `data.jl`: Script for simulating synthetic data based on the ground truth network; all reaction rate constants are $1.0$.
 - `workflow_fixed_opts.jl`: Standalone script that explains the steps leading up to parameter inference, including results for one optimisation instance ($L_1$ penalty, optimisation on log scale). This is designed to be run interactively line-by-line, e.g. in VS Code.
 - `setup.jl`: Setup file included for convenience when multiple optimisation instances are involved.
 - `inference_vary_opts.jl`: Script for running multiple instances of parameter inference for different optimisation settings, i.e. varying penalty functions, and whether optimisation is performed on the log space of the parameters or not.
