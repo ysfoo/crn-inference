@@ -7,10 +7,10 @@ include(joinpath(@__DIR__, "../../src/inference.jl"));
 include(joinpath(@__DIR__, "../evaluation.jl"));
 
 # Import synthetic data
-t_obs, data = read_data(joinpath(@__DIR__, "output"));
+t_obs, data = read_data(joinpath(@__DIR__, "data.txt"));
 
 # Visualise results
-for (pen_str, log_opt) in collect(opt_options)
+for (pen_str, log_opt) in opt_options
 	opt_dir = get_opt_dir(pen_str, log_opt) # directory for storing results
 
 	pen_hyp = HYP_DICT[pen_str]

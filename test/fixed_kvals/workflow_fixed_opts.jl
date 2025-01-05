@@ -26,7 +26,7 @@ ubs = UB .* ones(n_rx);
 
 
 ### Import synthetic data
-data_fname = joinpath(@__DIR__, "output", "data.txt")
+data_fname = joinpath(@__DIR__, "data.txt");
 fullmat = readdlm(data_fname);
 t_obs = fullmat[:,1];
 data = fullmat[:,2:end]';

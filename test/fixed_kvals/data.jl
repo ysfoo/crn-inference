@@ -11,7 +11,7 @@ t_span = (0., 10.); # time interval to solve on
 n_obs = 101;
 σ = 0.01;
 
-data_dir = joinpath(@__DIR__, "output");
+data_dir = @__DIR__;
 mkpath(data_dir); # create directory
 
 sim_data(

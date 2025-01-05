@@ -11,7 +11,7 @@ for (k1, k18, pen_str, hyp_str) in settings_vec
     true_kvec = make_true_kvec(k1, k18);
 
     data_dir = get_data_dir(k1, k18)
-    t_obs, data = read_data(data_dir);
+    t_obs, data = read_data(joinpath(data_dir, "data.txt"));
     
 	opt_dir = get_opt_dir(k1, k18, pen_str, hyp_str)
     pen_hyp = get_hyp(pen_str, hyp_str)
@@ -19,4 +19,5 @@ for (k1, k18, pen_str, hyp_str) in settings_vec
     
 	kmat = readdlm(joinpath(opt_dir, "inferred_rates.txt"));	
 	make_plots_runs(iprob, kmat, true_kvec, k, opt_dir);
+    GC.gc(); # garbage collection, just in case
 end

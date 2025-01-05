@@ -1,19 +1,19 @@
-##############################################################################
-### Performs inference for different optimisation options (multi-threaded) ###
-##############################################################################
+#############################################################
+### Performs inference for different optimisation options ###
+#############################################################
 
 include(joinpath(@__DIR__, "setup.jl")); # set up optimisation problem
 include(joinpath(@__DIR__, "../../src/inference.jl")); # imports key functions for inference
 
 # Import synthetic data
-t_obs, data = read_data(joinpath(@__DIR__, "output"));
+t_obs, data = read_data(joinpath(@__DIR__, "data.txt"));
 
 # Random initial points for optimisation runs
 Random.seed!(1);
 init_vec = [rand(n_rx) for _ in 1:N_RUNS];
 
-# Perform multi-start optimisation and export reaction rates
-Threads.@threads for (pen_str, log_opt) in collect(opt_options)
+# Export reaction rates
+for (pen_str, log_opt) in opt_options
 	opt_dir = get_opt_dir(pen_str, log_opt) # directory for storing results
 	mkpath(opt_dir); # create directory
 

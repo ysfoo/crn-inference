@@ -51,8 +51,8 @@ MULT_DICT = Dict("half_hyps" => 0.5, "orig_hyps" => 1.0, "double_hyps" => 2.0);
 
 # Helper functions
 
-function read_data(data_dir, data_fname="data.txt")
-	fullmat = readdlm(joinpath(data_dir, data_fname));
+function read_data(data_fname)
+	fullmat = readdlm(data_fname);
 	t_obs = fullmat[:,1];
 	data = fullmat[:,2:end]';
 	return t_obs, data # NB: `data` is a matrix of dimensions n_species * n_obs

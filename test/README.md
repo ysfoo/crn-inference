@@ -19,7 +19,7 @@ Both the full network and the ground network are defined in `define_networks.jl`
 - approximate $L_0$ penalty: $\mathrm{pen}(\theta) = \lambda \theta^{0.1}$,
 - horseshoe-like penalty: $\mathrm{pen}(\theta) = -\log \log ( 1 + 1/(\lambda\theta)^2 )$,
 
-where $\lambda$ is a hyperparameter to be chosen. During optimisation, we impose a stricitly positive lower bound of $\theta \ge 10^{-10}$ as some penalty functions are undefined when $\theta=0$.
+where $\lambda$ is a hyperparameter to be chosen. See `penalty_funcs.png` for plots of these penalty functions. During optimisation, we impose a stricitly positive lower bound of $\theta \ge 10^{-10}$ as some penalty functions are undefined when $\theta=0$.
 
 We use a multi-start optimisation approach, i.e. we execute multiple ($15$) optimisation runs each with different starting values for the parameters. Note that we assume that the initial conditions ($X_1(0)=X_2(0)=0, X_3(0)=1$) and noise standard deviations ($\sigma=0.01$) are known.
 
@@ -46,7 +46,9 @@ Finally, we are interested in how well each penalty function encourages sparsity
 Things to do:
 - Finish computing all evaluation metrics
 - Implement hyperparameter grid search
-- Investigate compilation times (`optimize` from `Optim.jl`)
+- Alternative cutoff determination (backward elimination)
+- Reaction-specific hyperparameters
+- Multicollinearity in reaction rates
 
 Things unlikely to be done here but are likely needed in practice:
 - Estimate noise SD (currently assumed to be known during inference)

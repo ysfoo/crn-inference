@@ -17,7 +17,7 @@ Threads.@threads for (k1, k18, pen_str, hyp_str) in settings_vec
 
     # Import synthetic data    
     data_dir = get_data_dir(k1, k18)
-    t_obs, data = read_data(data_dir);
+    t_obs, data = read_data(joinpath(data_dir, "data.txt"));
     n_obs = length(t_obs);
 	
     # Make directory

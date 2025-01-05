@@ -7,7 +7,7 @@ include(joinpath(@__DIR__, "../../src/inference.jl"));
 include(joinpath(@__DIR__, "../evaluation.jl"));
 
 # Directory for figures
-fig_dir = mkpath(@__DIR__, "output/eval_figs");
+fig_dir = joinpath(@__DIR__, "output/eval_figs");
 mkpath(fig_dir);
 
 # Text to appear on plots
@@ -19,14 +19,14 @@ kmat_dict = Dict{Tuple, AbstractMatrix}();
 loffset_dict = Dict{Tuple, AbstractVector}();
 best_kvec_dict = Dict{Tuple, AbstractVector}();
 best_loffset_dict = Dict{Tuple, Float64}();
-traj_err_dict = Dict{Tuple, Float64}();
+traj_err_dict = Dict{Tuple, AbstractMatrix}();
 
 t_grid = range(t_span..., 1001);
 
 for settings in settings_vec
     k1, k18, pen_str, hyp_str = settings
-    t_obs, data = read_data(get_data_dir(k1, k18));
-    iprob = get_iprob(oprob, t_obs, data, pen_str, LB, k, get_hyp(pen_str, hyp_str))
+    t_obs, data = read_data(joinpath(get_data_dir(k1, k18), "data.txt"));
+    iprob = make_iprob(oprob, t_obs, data, pen_str, LB, k, get_hyp(pen_str, hyp_str))
     kmat = readdlm(joinpath(get_opt_dir(k1, k18, pen_str, hyp_str), "inferred_rates.txt"));
     true_kvec = make_true_kvec(k1, k18)
     
@@ -43,7 +43,7 @@ for settings in settings_vec
     best_kvec_dict[settings] = kmat[:,min_idx]
     best_loffset_dict[settings] = loffset_vec[min_idx]
 
-    traj_err_dict[settings] = get_traj_err(est_kvec, true_kvec, oprob, k, t_grid)
+    traj_err_dict[settings] = get_traj_err(kmat[:,min_idx], true_kvec, oprob, k, t_grid)
 end
 
 

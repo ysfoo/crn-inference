@@ -31,7 +31,10 @@ ubs = UB .* ones(n_rx);
 N_RUNS = 15; # number of optimisation runs
 
 # All possible optimisation options
-opt_options = Iterators.product(["L1", "logL1", "approxL0", "hslike"], [true, false]);
+opt_options = collect(Iterators.product(
+	["L1", "logL1", "approxL0", "hslike"], 
+	[true, false]
+));
 
 # Default hyperparameter values
 HYP_DICT = Dict(
@@ -49,8 +52,8 @@ true_kvec[1] = true_kvec[18] = true_kvec[13] = 1.; # ground truth reaction rate 
 # Helper functions
 
 # Read in data
-function read_data(data_dir, data_fname="data.txt")
-	fullmat = readdlm(joinpath(data_dir, data_fname));
+function read_data(data_fname)
+	fullmat = readdlm(data_fname);
 	t_obs = fullmat[:,1];
 	data = fullmat[:,2:end]';
 	return t_obs, data # NB: `data` is a matrix of dimensions n_species * n_obs
