@@ -48,7 +48,7 @@ Things to do:
 - Implement hyperparameter grid search
 - Alternative cutoff determination (backward elimination)
 - Reaction-specific hyperparameters
-- Multicollinearity in reaction rates
+- Starting points for optimisation
 
 Things unlikely to be done here but are likely needed in practice:
 - Estimate noise SD (currently assumed to be known during inference)

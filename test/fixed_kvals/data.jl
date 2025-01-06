@@ -11,9 +11,7 @@ t_span = (0., 10.); # time interval to solve on
 n_obs = 101;
 σ = 0.01;
 
-data_dir = @__DIR__;
-mkpath(data_dir); # create directory
-
+data_dir = @__DIR__; # data will be stored in same directory as this file
 sim_data(
 	true_rn, true_kmap, true_x0map, t_span, n_obs, σ,
 	data_dir, 2024

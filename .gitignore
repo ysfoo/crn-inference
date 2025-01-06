@@ -15,3 +15,6 @@ slurm*
 
 # VS Code
 .vscode/
+
+# Jupyter checkpoints
+**/.ipynb_checkpoints/
