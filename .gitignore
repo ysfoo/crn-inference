@@ -1,3 +1,4 @@
+# Temporary misc files to ignore
 unused/
 
 # Skip figures that include all runs for `test/vary_kvals`
