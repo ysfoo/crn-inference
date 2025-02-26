@@ -4,6 +4,14 @@
 
 include(joinpath(@__DIR__, "../src/plot_helper.jl"));
 
+
+function mask_kvec(isol, inferred_rxs)
+	est_kvec = zeros(length(isol.kvec))
+	est_kvec[inferred_rxs] .= isol.kvec[inferred_rxs];
+	return est_kvec
+end
+
+
 ## Functions for evaluation metrics
 
 # Errors in trajectory reconstruction as a matrix of dimensions n_species x n_grid

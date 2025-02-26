@@ -112,9 +112,7 @@ isol.iprob.loss_func(isol.kvec,isol.σs)
 isol.iprob.optim_func(isol.est)
 
 infer_reactions(isol; print_diff=true)
-est_kvec = zeros(length(isol.kvec))
-inferred_rxs = inferred_rxs_dict[settings]
-est_kvec[inferred_rxs] .= isol.kvec[inferred_rxs];
+est_kvec = mask_kvec(isol, inferred_rxs_dict[settings])
 
 true_kvec = make_true_kvec(k1, k18);
 get_traj_Linf(get_traj_err(
@@ -275,13 +273,8 @@ for k1 in K1_VALS, k18 in K18_VALS, pen_str in PEN_STRS
     hyp_val = hyp_choice_dict[(k1, k18, pen_str)]
     settings = (k1, k18, pen_str, hyp_val)
     true_kvec = make_true_kvec(k1, k18);
-    isol = isol_dict[settings]  
-
-    # zero out non-inferred reactions
-    est_kvec = zeros(length(isol.kvec))
-    inferred_rxs = inferred_rxs_dict[settings]
-    est_kvec[inferred_rxs] = isol.kvec[inferred_rxs]
-    
+    isol = isol_dict[settings]      
+    est_kvec = mask_kvec(isol, inferred_rxs_dict[settings]) # zero out non-inferred reactions
     traj_err_dict[settings] = get_traj_err(
         est_kvec, true_kvec, isol.iprob.oprob, k, t_grid
     )
@@ -334,10 +327,7 @@ function make_kerr_plot(k_idx, true_k_dict, fig, ax_i)
     k_err_dict = Dict(
         settings => begin
             true_k = true_k_dict[settings];
-            isol = isol_dict[settings];
-            est_kvec = zeros(length(isol.kvec));
-            inferred_rxs = inferred_rxs_dict[settings];
-            est_kvec[inferred_rxs] = isol.kvec[inferred_rxs];
+            est_kvec = mask_kvec(isol = isol_dict[settings];, inferred_rxs_dict[settings])
             (est_kvec[k_idx] - true_k) / true_k
         end for (settings, isol) in isol_dict
     );
