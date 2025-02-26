@@ -38,6 +38,7 @@ for pen_str in PEN_STRS
     infer_vec = infer_reactions.(isol_vec)
     infer_rxs = first.(infer_vec)
     fit_vec = last.(infer_vec)
+    tune_idx = tune_hyp_lrt(isol_vec)
 
     ns = length.(infer_rxs)
     nmin, nmax = extrema(ns)
@@ -60,6 +61,8 @@ for pen_str in PEN_STRS
         ax2, HYP_VALS, ns, 
         color=palette[2]
     )
+    scatter!(ax1, HYP_VALS[tune_idx], fit_vec[tune_idx]; color=:dodgerblue4, marker=:star5, markersize=20)
+    scatter!(ax2, HYP_VALS[tune_idx], ns[tune_idx]; color=:darkorange4, marker=:star5, markersize=20)
     save(joinpath(fig_dir, "$pen_str.png"), f)
     # display(current_figure())
 

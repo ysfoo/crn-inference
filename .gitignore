@@ -3,8 +3,8 @@ unused/
 gen_LV/
 
 # Skip output figures unless specified
-test/fixed_kvals/output/**/*.png
-test/vary_kvals/output/**/*.png
+test/fixed_kvals/output/*/*/*.png
+test/vary_kvals/output/*/*/*/*.png
 
 !test/fixed_kvals/output/vary_hyp_figs/*
 !test/vary_kvals/output/eval_figs/*
