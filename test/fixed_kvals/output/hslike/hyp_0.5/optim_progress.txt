@@ -1,0 +1,16 @@
+Run 1: 0.96 seconds, diff = 0.58
+Run 2: 0.81 seconds, diff = -0.38
+Run 3: 1.23 seconds, diff = 3.22
+Run 4: 1.18 seconds, diff = 3.11
+Run 5: 0.90 seconds, diff = 3.13
+Run 6: 0.65 seconds, diff = 186.31
+Run 7: 1.92 seconds, diff = 0.54
+Run 8: 0.79 seconds, diff = 3.15
+Run 9: 0.55 seconds, diff = 14.45
+Run 10: 0.46 seconds, diff = 134.34
+Run 11: 1.21 seconds, diff = 1.58
+Run 12: 0.43 seconds, diff = -1.10
+Run 13: 0.85 seconds, diff = 1.93
+Run 14: 1.52 seconds, diff = -0.39
+Run 15: 0.42 seconds, diff = -1.10
+Run 16: 0.90 seconds, diff = 13.55

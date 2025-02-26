@@ -1,8 +1,13 @@
 # Temporary misc files to ignore
 unused/
 
-# Skip figures that include all runs for `test/vary_kvals`
-test/vary_kvals/output/**/*run*.png
+# Skip output figures unless specified
+test/fixed_kvals/output/**/*.png
+test/vary_kvals/output/**/*.png
+
+!test/fixed_kvals/output/vary_hyp_figs
+!test/vary_kvals/output/eval_figs
+!test/vary_kvals/output/vary_hyp_figs
 
 # Skip optimisation logs for `test/vary_kvals`
 test/vary_kvals/output/**/optim_progress.txt

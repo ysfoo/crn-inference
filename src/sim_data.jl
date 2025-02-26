@@ -19,8 +19,8 @@ include(joinpath(@__DIR__, "plot_helper.jl"));
 # n_obs   : Number of observation points
 # σ       : Noise standard deviation
 # dirname : Directory name to store simulated data
-# seed    : Random seed
-function sim_data(rn, kmap, x0map, t_span, n_obs, σ, dirname, seed=nothing)
+# rng     : Random number generator
+function sim_data(rn, kmap, x0map, t_span, n_obs, σ, dirname, rng=Random.default_rng())
 	n_species = length(x0map)
 	oprob = ODEProblem(rn, x0map, t_span, kmap);
 	sol = solve(oprob, saveat=range(t_span..., 1001)); # ODE solution
@@ -39,8 +39,7 @@ function sim_data(rn, kmap, x0map, t_span, n_obs, σ, dirname, seed=nothing)
 	t_obs = range(t_span..., n_obs);
 	y_noiseless = reduce(hcat, sol(t_obs).u);
 
-	Random.seed!(seed);
-	data = y_noiseless .+ σ .* randn(size(y_noiseless)); # additive noise
+	data = y_noiseless .+ σ .* randn(rng, size(y_noiseless)); # additive noise
 	data = max.(0.0, data); # clamp negative values to 0
 
 	# Plot noisy data with ground truth trajectories

@@ -2,6 +2,7 @@
 ### Simulate data where all rate constants are fixed ###
 ########################################################
 
+using StableRNGs
 include(joinpath(@__DIR__, "../../src/sim_data.jl")); # imports `sim_data` for simulating data
 include(joinpath(@__DIR__, "../define_networks.jl")); # defines true_rn
 
@@ -11,8 +12,6 @@ t_span = (0., 10.); # time interval to solve on
 n_obs = 101;
 σ = 0.01;
 
-data_dir = @__DIR__; # data will be stored in same directory as this file
-sim_data(
-	true_rn, true_kmap, true_x0map, t_span, n_obs, σ,
-	data_dir, 2024
-);
+rng = StableRNG(1); # random seed for reproducibility
+data_dir = @__DIR__; # data will be stored in same directory as this file, including plots
+sim_data(true_rn, true_kmap, true_x0map, t_span, n_obs, σ, data_dir, rng);

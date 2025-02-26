@@ -3,7 +3,6 @@
 ############################################
 
 using DelimitedFiles
-using Random
 
 using Format
 FMT_2DP = ".2f"; # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with 2 decimal points
@@ -16,7 +15,7 @@ x0map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # assume initial conditions are known
 n_obs = 101; # number of time points
 n_data = n_obs * length(x0map) # number of data points
 t_span = (0., 10.); # time interval to solve on
-σ = 0.01; # assume noise is known
+σs_true = fill(0.01, 3);
 
 # Set up ODE based on CRN library (full network)
 rx_vec = Catalyst.reactions(full_network); # list of reactions
@@ -28,21 +27,12 @@ LB, UB = 1e-10, 1e2; # bounds for reaction rate constants (i.e. parameters)
 lbs = LB .* ones(n_rx);
 ubs = UB .* ones(n_rx);
 
-N_RUNS = 15; # number of optimisation runs
+N_RUNS = 16; # number of optimisation runs
 
 # All possible optimisation options
-opt_options = collect(Iterators.product(
-	["L1", "logL1", "approxL0", "hslike"], 
-	[true, false]
-));
-
-# Default hyperparameter values
-HYP_DICT = Dict(
-	"L1" => 20.0, # manually chosen
-	"logL1" => 1.0, # taken from Gupta et al. (2020)
-	"approxL0" => log(n_data), # BIC-inspired
-	"hslike" => 20.0 # manually chosen
-);
+PEN_STRS = ["L1", "logL1", "approxL0", "hslike"]
+HYP_VALS = 2.0 .^ (-3:6)
+opt_options = collect(Iterators.product(PEN_STRS, HYP_VALS));
 
 # Define ground truth
 true_kvec = zeros(n_rx);
@@ -60,7 +50,7 @@ function read_data(data_fname)
 end
 
 # Directory name for where optimisation results are stored
-function get_opt_dir(pen_str, log_opt)
-	return joinpath(@__DIR__, "output", pen_str * "_" * (log_opt ? "uselog" : "nolog"))
+function get_opt_dir(pen_str, hyp_val)
+	return joinpath(@__DIR__, "output", pen_str, "hyp_$(hyp_val)")
 end
 

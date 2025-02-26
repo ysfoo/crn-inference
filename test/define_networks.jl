@@ -7,7 +7,7 @@ using Catalyst
 ### Define full CRN (i.e. library used for inference)
 
 t = default_t(); # time variable
-@species X1(t) X2(t) X3(t);
+species_vec = @species X1(t) X2(t) X3(t);
 complexes_vec = [[X1], [X2], [X3], [X1, X2], [X2, X3], [X1, X3]]; # all possible complexes
 
 # All possible reactions between ordered pairs of complexes
@@ -22,7 +22,7 @@ rx_vec = [
 ];
 
 # CRN
-@named full_network = ReactionSystem(rx_vec, t)
+@named full_network = ReactionSystem(rx_vec, t, species_vec, k)
 full_network = complete(full_network)
 
 # Export reaction list (uncomment to run)
@@ -39,6 +39,7 @@ full_network = complete(full_network)
 
 # Indices of reaction rate constants follow the reaction indices in the full network above
 true_rn = @reaction_network begin
+	@species X1(t) X2(t) X3(t)
 	k1, X1 --> X2
 	(k18, k13), X1 + X2 <--> X3	
 end
