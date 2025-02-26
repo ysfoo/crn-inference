@@ -1,5 +1,6 @@
 # Temporary misc files to ignore
 unused/
+gen_LV/
 
 # Skip output figures unless specified
 test/fixed_kvals/output/**/*.png

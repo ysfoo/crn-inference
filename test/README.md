@@ -43,6 +43,8 @@ We are also interested in how well each penalty function encourages sparsity. Gi
 
 ## Interpreting results from `make_plots_runs`
 
+Both `fixed_kvals/plot_runs.jl` and `vary_kvals/plot_runs.jl` call the function `make_plots_runs` to create plots summarising the optimisation results. 
+
 The images `inferred_rates_heatmap.png` summarise estimated reaction rate constants (clipped at 20.0, square root scale for colour). Note that the reactions in the ground truth network are outlined in boxes. This gives a sense of how many local minima the optimisation algorithm finds. For large hyperparameter values, the penalised loss function induced by the $L_1$ penalty has a very large basin of attraction for its global minimum. The same is not true for the other penalty functions.
 
 The images `inferred_rates_histogram.png` aggregate the estimated reaction rate constants over reactions and runs (y-axis clipped at 32). The shifted-log $L_1$ penalty function leads to the clearest separation of negligible and non-negligible rate constants (normalised). Other penalty functions do not provide a clear separation, especially the $L_1$ penalty function.
