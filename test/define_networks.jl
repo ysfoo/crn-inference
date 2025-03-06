@@ -22,7 +22,7 @@ rx_vec = [
 ];
 
 # CRN
-@named full_network = ReactionSystem(rx_vec, t, species_vec, k)
+@named full_network = ReactionSystem(rx_vec, t, species_vec, k; combinatoric_ratelaws=false)
 full_network = complete(full_network)
 
 # Export reaction list (uncomment to run)
@@ -39,6 +39,7 @@ full_network = complete(full_network)
 
 # Indices of reaction rate constants follow the reaction indices in the full network above
 true_rn = @reaction_network begin
+	@combinatoric_ratelaws false
 	@species X1(t) X2(t) X3(t)
 	k1, X1 --> X2
 	(k18, k13), X1 + X2 <--> X3	

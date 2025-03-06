@@ -20,18 +20,28 @@ end
 # oprob     : ODEProblem
 # k         : Symbolics object for reaction rate constants, e.g. as defined in `define_networks.jl`
 # t_grid    : Grid of time points to compute trajectory errors
-function get_traj_err(est_kvec, true_kvec, oprob, k, t_grid)
-	true_oprob = remake(oprob, p=[k => true_kvec])
+function get_traj_err(est_kvec, true_kvec, oprob, k, t_grid; u0=oprob.u0)
+	true_oprob = remake(oprob, p=[k => true_kvec], u0=u0)
     true_sol_grid = solve(true_oprob)(t_grid).u
-    est_oprob = remake(oprob, p=[k => est_kvec])
+    est_oprob = remake(oprob, p=[k => est_kvec], u0=u0)
     est_sol_grid = solve(est_oprob)(t_grid).u
 	return reduce(hcat, est_sol_grid .- true_sol_grid)
 end
 
 # L_∞ norm of trajectory errors (sum over species first)
 # traj_err : Matrix of trajectory errors, dimensions are n_species x n_grid
-function get_traj_Linf(traj_err)
+function get_traj_Linf(traj_err, ws=nothing)
 	return maximum(sum(abs.(traj_err), dims=1))
+end
+
+# L_1 norm of trajectory errors (sum over species first)
+# traj_err : Matrix of trajectory errors, dimensions are n_species x n_grid
+function get_traj_L1(traj_err, ws=ones(size(traj_err, 2)))
+	L1_rows = [
+		0.5 * sum(ws .* (err_row[begin:end-1] .+ err_row[begin+1:end]))
+		for err_row in eachrow(abs.(traj_err))
+	]
+	return sum(L1_rows)
 end
 
 
@@ -39,16 +49,16 @@ end
 # iprob      : ODEInferenceProb struct
 # est_mat    : Matrix of estimates, dimensions are (n_species+n_rx) * n_runs
 # true_kvec  : Ground-truth rate constants
-# σs_true    : Ground-truth noise standard deviations
+# true_σs    : Ground-truth noise standard deviations
 # k          : Symbolics object for reaction rate constants, e.g. as defined in `define_networks.jl`
 # dirname    : Directory to store plots in
 # indiv_runs : Whether to also plot the graphs for individual runs
-function make_plots_runs(iprob, est_mat, true_kvec, σs_true, k, dirname, indiv_runs=false)
+function make_plots_runs(iprob, est_mat, true_kvec, true_σs, k, dirname, indiv_runs=false)
 	kmat = get_kmat(iprob, est_mat)
 	n_rx, n_runs = size(kmat)
 	n_species = length(iprob.oprob.u0)
 
-	true_θ = [σs_true; iprob.tf(true_kvec)];
+	true_θ = [true_σs; iprob.tf(true_kvec)];
 	
 	# Optimised value of penalised loss for each run
 	optim_vals = iprob.optim_func.(eachcol(est_mat))

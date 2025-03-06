@@ -10,16 +10,15 @@ FMT_2DP = ".2f"; # `pyfmt(FMT_2DP, num)` converts a float `num` to a string with
 include(joinpath(@__DIR__, "../define_networks.jl")); # defines `full_network` and `k` (Symbolics object for rate constants)
 
 # Known quantities
-x0map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # assume initial conditions are known
+x0_map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # assume initial conditions are known
 n_obs = 101; # number of time points
-n_data = n_obs * length(x0map) # number of data points
+n_data = n_obs * length(x0_map) # number of data points
 t_span = (0., 10.); # time interval to solve on
-σs_true = fill(0.01, 3);
 
 # Set up ODE based on CRN library (full network)
 rx_vec = Catalyst.reactions(full_network); # list of reactions
 n_rx = length(rx_vec);
-oprob = ODEProblem(full_network, x0map, t_span, zeros(n_rx)); # all rates here are zero, no dynamics
+oprob = ODEProblem(full_network, x0_map, t_span, zeros(n_rx)); # all rates here are zero, no dynamics
 
 # Optimisation setup
 LB, UB = 1e-10, 1e2; # bounds for reaction rate constants (i.e. parameters)

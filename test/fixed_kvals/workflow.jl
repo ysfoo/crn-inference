@@ -14,11 +14,12 @@ include(joinpath(@__DIR__, "../eval_helper.jl")); # imports functions used for r
 
 
 ### Setup
-x0map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # assume initial conditions are known
+x0_map = [:X1 => 0., :X2 => 0., :X3 => 1.]; # assume initial conditions are known
 t_span = (0., 10.);
 rx_vec = Catalyst.reactions(full_network); # list of reactions
 n_rx = length(rx_vec);
-oprob = ODEProblem(full_network, x0map, t_span, zeros(n_rx)); # all rates here are zero, no dynamics
+oprob = ODEProblem(full_network, x0_map, t_span, zeros(n_rx)); # all rates here are zero, no dynamics
+true_σs = vec(readdlm(joinpath(@__DIR__, "stds_true.txt")))
 
 LB, UB = 1e-10, 1e2; # bounds for reaction rate constants (i.e. parameters)
 lbs = LB .* ones(n_rx);
@@ -42,19 +43,19 @@ data[:,end] # final data point (noisy), should be similar to above
 
 
 ### Data preprocessing
-smoothers = smooth_data.(eachrow(data), Ref(t_obs));
+smooth_resvec = smooth_data.(eachrow(data), Ref(t_obs));
 
-# visualise smoothers
+# visualise smoothed data
 f = Figure();
 ax = Axis(f[1,1]);
-for i in 1:n_species
-    lines!(smoothers[i].t̂, smoothers[i].û)
-    scatter!(t_obs, data[i,:], alpha=0.6)
+for i in 1:n_species    
+    scatter!(t_obs, data[i,:], color=(palette[i], 0.6))
+    lines!(t_obs, eval_spline(smooth_resvec[i]..., t_obs), color=palette[i])
 end
 current_figure()
 
-σs_init = estim_σ.(eachrow(data), smoothers)
-scale_fcts = get_scale_fcts(smoothers, species_vec, rx_vec, k)
+init_σs = [estim_σ(datarow .- eval_spline(res..., t_obs)) for (datarow, res) in zip(eachrow(data), smooth_resvec)]
+scale_fcts = get_scale_fcts(smooth_resvec, range(extrema(t_obs)..., 50), species_vec, rx_vec, k)
 
 ### Optimisation
 
@@ -74,23 +75,28 @@ mkpath(OPT_DIR); # create directory
 N_RUNS = 16; # number of optimisation runs
 
 # Create ODEInferenceProb struct, see `src/inference.jl` for documentation of fields
-iprob = make_iprob(oprob, k, t_obs, data, σs_init, PEN_STR, hyp_val; scale_fcts);
+iprob = make_iprob(oprob, k, t_obs, data, PEN_STR, hyp_val; scale_fcts);
 
 # `iprob.tf` accounts for log transform and rate scaling
-true_θ = [σs_true; iprob.tf(true_kvec)];
+true_θ = [true_σs; iprob.tf(true_kvec)];
 true_penloss = iprob.optim_func(true_θ)
-iprob.loss_func(true_kvec, fill(0.01, 3))
+iprob.loss_func(true_kvec, true_σs)
 
 ## Test type stability and computational time
-# @code_warntype iprob.optim_func([fill(0.01, 3); iprob.tf(true_kvec)])
+@code_warntype iprob.optim_func.f([true_σs; iprob.tf(true_kvec)])
 
-# using BenchmarkTools
-# @btime iprob.optim_func(true_θ)
+using BenchmarkTools
+@btime iprob.optim_func(true_θ)
+@time iprob.optim_func(true_θ);
 
-# using ForwardDiff
-# cfg = ForwardDiff.GradientConfig(iprob.optim_func, true_θ);
-# @btime ForwardDiff.gradient(iprob.optim_func, $true_θ, $cfg)
+using ForwardDiff
+cfg = ForwardDiff.GradientConfig(iprob.optim_func.f, true_θ);
+ForwardDiff.gradient(iprob.optim_func.f, true_θ, cfg)
 
+@btime ForwardDiff.gradient($iprob.optim_func.f, $true_θ, $cfg);
+@time ForwardDiff.gradient(iprob.optim_func.f, true_θ, cfg);
+
+@code_warntype ForwardDiff.gradient(iprob.optim_func.f, true_θ, cfg)
 
 # Random initial points for optimisation runs
 # using Distributions
@@ -109,7 +115,7 @@ function optim_callback(i, res)
 end
 
 # Perform multi-start optimisation
-@time res_vec = optim_iprob(iprob, lbs, ubs, init_vec; callback_func=optim_callback);
+@time res_vec = optim_iprob(iprob, lbs, ubs, init_vec, init_σs; callback_func=optim_callback);
 
 est_σs = res_vec[2].minimizer[1:3]
 est_kvec = iprob.itf(res_vec[2].minimizer[4:end])
@@ -122,7 +128,7 @@ export_estimates(res_vec, OPT_DIR);
 # Read in reactions rates
 est_mat = readdlm(joinpath(OPT_DIR, "estimates.txt"));
 # Visualise results
-make_plots_runs(iprob, est_mat, true_θ, k, OPT_DIR);
+make_plots_runs(iprob, est_mat, true_kvec, true_σs, k, OPT_DIR);
 
 
 ### Evaluation
@@ -136,4 +142,4 @@ sum(abs.(est_kvec[true_rx] .- true_kvec[true_rx]))
 # sum of all other reaction rates
 sum(est_kvec) - sum(est_kvec[true_rx])
 
-infer_reactions(make_isol(iprob, est_mat))
+infer_reactions(make_isol(iprob, est_mat), species_vec, rx_vec)
