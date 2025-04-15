@@ -18,6 +18,7 @@ using Distributions
 using LineSearches
 using Optim
 
+DEF_SOLVER = AutoTsit5(Rosenbrock23());
 
 ### Functions for data pre-processing
 
@@ -27,11 +28,13 @@ using Optim
 # t_itp  : Interpolation points to penalise d-th order derivative at
 # alg    : Algorithm for determining smoothing hyperparameter, see RegularizationSmooth from DataInterpolations.jl
 function smooth_data(u, t; d=2, t_itp=range(extrema(t)..., 50), alg=:L_curve)
-	basis = BSplineBasis(BSplineKit.BSplineOrder(4), t_itp);
+	basis = BSplineBasis(BSplineKit.BSplineOrder(4), copy(t_itp));
 	B = collocation_matrix(basis, t, BSplineKit.Derivative(0), SparseMatrixCSC{Float64});
 	D = collocation_matrix(basis, t_itp, BSplineKit.Derivative(d), SparseMatrixCSC{Float64});
 	Ψ = RegularizationTools.setupRegularizationProblem(B, collect(D))
-	β = RegularizationTools.solve(Ψ, u; alg=alg).x
+	scale = sqrt(sum(abs2, Ψ.Ā) / length(Ψ.Ā) * length(t))
+	sol = RegularizationTools.solve(Ψ, u; alg=alg, λ₁=1e-4scale, λ₂=scale)
+	β = sol.x
 	return (basis, β)
 end
 
@@ -73,6 +76,10 @@ end
 
 ### Functions to be called for parameter inference
 
+function strict_clamp(x, l, u, ϵ=1e-6)
+	return clamp(x, l+ϵ*(u-l), u-ϵ*(u-l))
+end
+
 # Wrapper for function to be passed to `Optim` to reduce compilation time
 struct FunctionWrapper
     f::Function
@@ -109,42 +116,43 @@ end
 # pen_str     : Choice of penalty function, one of < L1 | logL1 | approxL0 | hslike >
 # pen_hyp     : Hyperparameter for penalty function
 # lower_bound : Lower bound of scaled rate constants
-function make_iprob(oprob, k, t_obs, data, pen_str, pen_hyp; scale_fcts=ones(length(k)), lower_bound=1e-10)
+function make_iprob(oprob, k, t_obs, data, pen_str, pen_hyp; 
+	                scale_fcts=ones(length(k)), lower_bound=1e-10,
+					alg=DEF_SOLVER, kwargs...)
 	n_species = size(data, 1)
-	loss_func = make_loss_func(oprob, k, t_obs, data)
+	loss_func = make_loss_func(oprob, k, t_obs, data; alg=alg, kwargs...)
 	pen_func = make_pen_func(pen_str, pen_hyp, lower_bound)
 	tf = k -> log.(max.(lower_bound, k ./ scale_fcts))
 	itf = u -> exp.(u) .* scale_fcts
-	optim_func = FunctionWrapper(u -> begin 
-		σs = u[1:n_species]
-		k_unscaled = exp.(u[n_species+1:end]); 
-		loss_func(k_unscaled .* scale_fcts, σs) + sum(pen_func, k_unscaled) 
+	optim_func = FunctionWrapper(u -> begin 		
+		k_unscaled = exp.(u[1:end-n_species]); 
+		σs = exp.(u[end-n_species+1:end])
+		loss_func(k_unscaled .* scale_fcts, σs) + sum(pen_func, k_unscaled)
 	end);
 	return ODEInferenceProb(oprob, k, t_obs, data, scale_fcts, tf, itf, loss_func, pen_func, optim_func)
 end
 
 # Performs multi-start optimisation from different initial points for parameter inference
 # iprob         : ODEInferenceProb struct
-# lbs           : Vector of lower bounds for parameters
-# ubs           : Vector of upper bounds for parameters
-# init_vec      : Vector of initial points for normalised rate constants for optimisation runs
-# init_σs       : Vector of initial points for ODE parameters for optimisation runs
+# lbs           : Lower bounds for all parameters
+# ubs           : Upper bounds for all parameters
+# init_vecs     : Vector of initial points for normalised rate constants for optimisation runs
+# init_σs       : Initial point for noise standard deviations
 # optim_alg     : Optimisation algorithm from `Optim.jl`
 # optim_opts    : Optimisation options of type `Optim.Options`
 # callback_func : Function for displaying progress of each run, takes in run index (integer) and optimisation result as input
 function optim_iprob(
-	iprob, lbs, ubs, init_vec, init_σs; 
+	iprob, lbs, ubs, init_vecs, init_σs;
 	optim_alg=Fminbox(BFGS(linesearch = LineSearches.BackTracking())),
 	optim_opts=Optim.Options(x_abstol=1e-10, f_abstol=1e-10, outer_x_abstol=1e-10, outer_f_abstol=1e-10),
 	callback_func=(i, res) -> nothing
 )
 	res_vec = Vector{Optim.MultivariateOptimizationResults}([]);
-	for (i, init_params) in enumerate(init_vec)
+	for (i, init_vec) in enumerate(init_vecs)
 		res = optimize(
 			iprob.optim_func, 
-			[0.01.*init_σs; log.(lbs)], 
-			[100.0.*init_σs; log.(ubs)],
-			[init_σs; log.(clamp.(init_params, lbs, ubs))],
+			log.(lbs), log.(ubs),
+			log.(strict_clamp.([init_vec; init_σs], lbs, ubs)),
 			optim_alg, optim_opts; autodiff = :forward
 		)
 		callback_func(i, res)
@@ -157,7 +165,7 @@ end
 # res_vec : Vector of optimisation results
 # dirname : Directory to store estimates in
 function export_estimates(res_vec, dirname)
-	est_mat = reduce(hcat, [r.minimizer for r in res_vec]);
+	est_mat = reduce(hcat, [r.minimizer for r in res_vec if Optim.converged(r)]);
 	writedlm(joinpath(dirname, "estimates.txt"), est_mat);
 	return est_mat
 end
@@ -165,7 +173,7 @@ end
 function get_kmat(iprob, est_mat)
 	n_species = size(iprob.data, 1)
 	return reduce(hcat, [
-		iprob.itf(est[n_species+1:end]) for est in eachcol(est_mat)
+		iprob.itf(est[1:end-n_species]) for est in eachcol(est_mat)
 	])
 end
 
@@ -180,15 +188,15 @@ function make_isol(iprob, est_mat)
 	n_species = size(iprob.data, 1)
 	optim_vals = iprob.optim_func.(eachcol(est_mat))
 	est = est_mat[:,argmin(optim_vals)] # extract best run
-	σs = est[1:n_species]
-	kvec = iprob.itf(est[n_species+1:end])
+	kvec = iprob.itf(est[1:end-n_species])
+	σs = exp.(est[end-n_species+1:end])
 	return ODEInferenceSol(iprob, est, kvec, σs)
 end
 
 
 ### Functions to be called for structural inference
 
-function infer_reactions_prev(isol; thres=cquantile(Chisq(1), 1e-6)/2, print_diff=false)
+function infer_reactions_prev(isol; thres=cquantile(Chisq(1), 1e-4)/2, print_diff=false)
     loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
     tmp_kvec = zeros(length(isol.kvec))
     inferred = Vector{Int}()
@@ -206,33 +214,35 @@ function infer_reactions_prev(isol; thres=cquantile(Chisq(1), 1e-6)/2, print_dif
 	return (inferred, isol.iprob.loss_func(tmp_kvec, isol.σs))
 end
 
-# Decide which reactions are present in the system given estimated rate constants
-function infer_reactions(isol, species_vec, rx_vec; n_itp=50, thres=cquantile(Chisq(1), 1e-4)/2, print_diff=false)
+function sort_reactions(isol, species_vec, rx_vec; 
+	                    n_itp=101, alg=DEF_SOLVER, kwargs...)
 	setter = setp(isol.iprob.oprob, isol.iprob.k)
-	n_species, n_obs = size(isol.iprob.data)
-	
 	ratelaws = substitute.(oderatelaw.(rx_vec), Ref(Dict(k => isol.kvec)));
 	t_itp = range(extrema(isol.iprob.t_obs)..., n_itp)
 	setter(isol.iprob.oprob, isol.kvec)
-	sol = solve(isol.iprob.oprob, AutoTsit5(Rosenbrock23()); saveat=t_itp)
+	sol = solve(isol.iprob.oprob, alg; saveat=t_itp, kwargs...)
 	rates_itp = [
 		substitute.(ratelaws, Ref(Dict(species_vec .=> pt)))
 		for pt in sol.u];
-	sorted_idxs = sortperm([sum(getindex.(rates_itp, idx)) for idx in 1:length(rx_vec)])
-	
+	return sortperm([sum(getindex.(rates_itp, idx)) for idx in 1:length(rx_vec)], rev=true)
+end
+
+# Decide which reactions are present in the system given estimated rate constants
+function infer_reactions(isol, species_vec, rx_vec; 
+	                     n_itp=50, thres=cquantile(Chisq(1), 1e-2)/2, print_diff=false,
+						 alg=DEF_SOLVER, kwargs...)
+	sorted_idxs = sort_reactions(
+		isol, species_vec, rx_vec; 
+		n_itp, alg, kwargs...
+	)	
 	loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
-	fit_val = 0.0
     tmp_kvec = zeros(length(isol.kvec))
+	fit_val = missing
     inferred = Vector{Int}()
-    for idx in reverse(sorted_idxs)
+    for idx in sorted_idxs
 		push!(inferred, idx)
         tmp_kvec[idx] = isol.kvec[idx]
-		# remade = remake(isol.iprob.oprob; p=[isol.iprob.k => tmp_kvec])		
-		# sol = solve(remade, AutoTsit5(Rosenbrock23()); saveat=isol.iprob.t_obs)
-		setter(isol.iprob.oprob, tmp_kvec)
-		sol = solve(isol.iprob.oprob, AutoTsit5(Rosenbrock23()); saveat=isol.iprob.t_obs)
-		σs_est = std.(eachrow(sol[1:n_species,:] .- isol.iprob.data); corrected=false, mean=0.)
-		fit_val = 0.5*n_species*n_obs + n_obs*sum(log, σs_est)
+		fit_val = isol.iprob.loss_func(tmp_kvec, isol.σs)
 		loss_diff = fit_val - loss_val
 		if print_diff
 			println(idx, " ", loss_diff)
@@ -244,8 +254,49 @@ function infer_reactions(isol, species_vec, rx_vec; n_itp=50, thres=cquantile(Ch
 	return (inferred, fit_val)
 end
 
+# Decide which reactions are present in the system given estimated rate constants
+function map_isol(isol, species_vec, rx_vec; 
+	n_itp=50, thres=5.0, min_k_dimless=1e-6,
+	alg=DEF_SOLVER, kwargs...)
+	sorted_idxs = sort_reactions(
+		isol, species_vec, rx_vec; 
+		n_itp, alg, kwargs...
+	)
+	sorted_idxs = [idx for idx in sorted_idxs if isol.est[idx]>log(min_k_dimless)]
+	n_data = length(isol.iprob.data)
+	loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
+	tmp_kvec = zeros(length(isol.kvec))
+	tmp_bic = missing
+	best_bic = Inf
+	bic_vec = Vector{Float64}()
+	for (i, idx) in enumerate(sorted_idxs)
+		if 2*loss_val + log(n_data)*i > best_bic + thres
+			break
+		end
+		tmp_kvec[idx] = isol.kvec[idx]
+		tmp_loss = isol.iprob.loss_func(tmp_kvec, isol.σs)
+		tmp_bic = 2*tmp_loss + log(n_data)*i
+		push!(bic_vec, tmp_bic)
+		best_bic = min(best_bic, tmp_bic)
+	end
+	crn_sizes = findall((<=)(best_bic+thres), bic_vec)
+	return Dict(sorted_idxs[1:s] => bic_vec[s] for s in crn_sizes)
+end
+
+# function est_σs_given_kvec(t_obs, data, oprob, setter, kvec; alg=DEF_SOLVER, kwargs...)
+# 	n_species = size(data, 1)
+# 	setter(oprob, kvec)
+# 	sol = solve(oprob, alg; saveat=t_obs, kwargs...)
+# 	if SciMLBase.successful_retcode(sol)
+# 		return std.(eachrow(sol[1:n_species,:] .- data); corrected=false, mean=0.)
+# 	else
+# 		return fill(Inf, n_species)
+# 	end
+# end
+
+
 # Hyperparameter tuning via BIC
-function tune_hyp_bic(inferred_vec, fit_vec)
+function tune_hyp_bic(inferred_vec, fit_vec, n_data)
 	best = 1
 	best_inferred = inferred_vec[1]
 	best_fit = fit_vec[1]
@@ -255,7 +306,7 @@ function tune_hyp_bic(inferred_vec, fit_vec)
 		n_diff = length(best_inferred) - length(inferred)
 		if n_diff > 0
 			# if difference in loss is not larger than critical value, favour simpler model
-			if fit - best_fit < log(303)/2*n_diff
+			if fit - best_fit < log(n_data)/2*n_diff
 				best = idx
 				best_inferred, best_fit = inferred, fit
 			end
@@ -293,12 +344,11 @@ end
 ### Helper functions that do not need to be directly called when using this module
 
 # Loss function to minimise for parameter estimation, note that `pen_func` is generic
-function make_loss_func(oprob, k, t_obs, data)
+function make_loss_func(oprob, k, t_obs, data; alg=DEF_SOLVER, kwargs...)
 	mtk_p = parameter_values(oprob) # MTK parameters object
 	param_vals, repack, _ = canonicalize(Tunable(), mtk_p)
     cache = DiffCache(copy(param_vals));
     setter = setp(oprob, k);
-    alg = AutoTsit5(Rosenbrock23());
 	idxs = Tuple.(CartesianIndices(data))
 	n_obs = length(t_obs)
     return function loss_func(x::Vector{T}, σs::Vector{T})::T where T
@@ -307,9 +357,9 @@ function make_loss_func(oprob, k, t_obs, data)
         repacked_p = repack(buffer) # replace tunable portion of mtk_p with buffer
         setter(repacked_p, x) # set the updated values
         remade_oprob = remake(oprob; p = repacked_p)
-        sol = solve(remade_oprob, alg; saveat=t_obs);
+        sol = solve(remade_oprob, alg; saveat=t_obs, kwargs...)
         if !SciMLBase.successful_retcode(sol)
-            return Inf
+            return floatmax(Float64)
         end
 		loss = sum(log, σs) * n_obs
 		for (i, j) in idxs
@@ -317,6 +367,62 @@ function make_loss_func(oprob, k, t_obs, data)
 		end
 		return loss
     end
+end
+
+# function refine_isol(isol, idxs, lbs, ubs,
+# 	optim_alg=Fminbox(BFGS(linesearch = LineSearches.BackTracking())),
+# 	optim_opts=Optim.Options(x_abstol=1e-10, f_abstol=1e-10, outer_x_abstol=1e-10, outer_f_abstol=1e-10)
+# )
+# 	n_species = length(isol.σs)
+# 	if refine_func === nothing
+# 		refine_func = make_refine_func(isol.iprob, idxs)
+# 	end
+# 	init_vec = [isol.est[idxs]; isol.est[end-n_species+1:end]]
+# 	res = optimize(
+# 		refine_func, lbs, ubs, init_vec,
+# 		optim_alg, optim_opts;
+# 		autodiff = :forward
+# 	)
+# 	est = fill(-Inf, length(isol.est))
+# 	est[idxs] .= res.minimizer[1:length(idxs)]
+# 	est[end-n_species+1:end] .= res.minimizer[end-n_species+1:end]
+# 	kvec = isol.iprob.itf(est[1:end-n_species])
+# 	σs = exp.(est[end-n_species+1:end])
+# 	return ODEInferenceSol(isol.iprob, est, kvec, σs), res, refine_func
+# end
+
+function refine_isol(refine_func, isol, idxs, σ_lbs=0., σ_ubs=Inf;
+	optim_alg=BFGS(),
+	optim_opts=Optim.Options()
+)
+	n_species = length(isol.σs)
+	init_vec = [isol.est[idxs]; isol.est[end-n_species+1:end]]
+	res = optimize(
+		refine_func, init_vec,
+		optim_alg, optim_opts;
+		autodiff = :forward
+	)
+	est = fill(-Inf, length(isol.est))
+	est[idxs] .= res.minimizer[1:length(idxs)]
+	est[end-n_species+1:end] .= clamp.(res.minimizer[end-n_species+1:end],  log.(σ_lbs), log.(σ_ubs))
+	kvec = isol.iprob.itf(est[1:end-n_species])
+	σs = exp.(est[end-n_species+1:end])
+	return ODEInferenceSol(isol.iprob, est, kvec, σs), res, refine_func
+end
+
+function make_refine_func(iprob, idxs, σ_lbs=0., σ_ubs=Inf)
+	n_idxs = length(idxs)
+	n_species = size(iprob.data, 1)
+	scale_fcts = iprob.scale_fcts[idxs]
+	cache = DiffCache(zeros(length(iprob.k)))
+	function refine_func(u::Vector{T})::T where T		
+		kvec::Vector{T} = get_tmp(cache, u)
+		kvec .= zero(eltype(u))
+		kvec[idxs] .= exp.(u[1:n_idxs]) .* scale_fcts
+		σs = clamp.(exp.(u[end-n_species+1:end]), σ_lbs, σ_ubs)
+		iprob.loss_func(kvec, σs)
+	end
+	return FunctionWrapper(refine_func)
 end
 
 # Penalty functions on parameters
@@ -336,14 +442,47 @@ function approxL0_pen(x, hyp) # hyp * no of params, which is approximated by x^2
 end
 
 function hslike_pen(x, hyp) # horseshoe-like prior, scale = 1/hyp
-	-log(log(1 + abs2(1/(hyp*x))))
+	-log(log1p(abs2(1/(hyp*x))))
 end
+
+function L1_invert(d, ϵ=1e-10)
+	d / (1-ϵ)
+end
+
+function logL1_invert(d, ϵ=1e-10)
+	-d/log(ϵ)
+end
+
+function approxL0_invert(d, ϵ=1e-10)
+	d / (1-ϵ^0.1)
+end
+
+function hslike_invert(d, ϵ=1e-10)
+	exp(optimize(
+		(u) -> abs2(hslike_pen(1, exp(u)) - hslike_pen(ϵ, exp(u)) - d), 
+		-50, 50).minimizer)
+end
+
+HYP_DICT = Dict(
+	"L1" => 4.0 .^ (-3:6),
+	"logL1" => 2.0 .^ (-3:6) ./ log(1e10),
+	"approxL0" => 2.0 .^ (-3:6),
+	"hslike" => 32.0 .^ (-3:6)
+)
 
 # Create specific penalty function
-function make_pen_func(pen_str, hyp, lower_bound)
-	pen_func = eval(Meta.parse(pen_str * "_pen"));
-	return x -> pen_func(x, hyp) - pen_func(lower_bound, hyp)
+function make_pen_func(pen_str, d, ϵ=1e-10)
+	pen_func = eval(Meta.parse(pen_str * "_pen"));	
+	hyp = HYP_DICT[pen_str][d]
+	return x -> pen_func(x, hyp) - pen_func(ϵ, hyp)
 end
 
-
-
+using Distributions
+function elicit_bb_prior(n, mean_guess, std_guess)	
+    function obj(x)
+        α, β = exp(x[1]), exp(x[2])
+        return (n*α/(α+β) - mean_guess)^2 + (n*α*β*(n+α+β)/((α+β)^2*(α+β+1)) - std_guess^2)^2
+    end
+    res = optimize(FunctionWrapper(obj), [1., 1.]; autodiff=:forward)
+	return BetaBinomial(n, exp.(res.minimizer)...)
+end

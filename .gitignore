@@ -11,8 +11,8 @@ test/vary_kvals/output/*/*/*/*.png
 !test/vary_kvals/output/eval_figs/*
 !test/vary_kvals/output/vary_hyp_figs/*
 
-# Skip optimisation logs for `test/vary_kvals`
-test/vary_kvals/output/**/optim_progress.txt
+# Skip optimisation logs
+test/**/optim_progress.txt
 
 # HPC files
 *.slurm
