@@ -20,6 +20,10 @@ include(joinpath(@__DIR__, "../eval_helper.jl"));
 include(joinpath(@__DIR__, "setup.jl"));
 include(joinpath(@__DIR__, "gold_std.jl"));
 
+NO_CROSS = false
+EST_FNAME = NO_CROSS ? "nocross_estimates.txt" : "refined_estimates.txt"
+PLT_FNAME = NO_CROSS ? "top_crns_nocross.png" : "top_crns_crossover.png"
+
 pen_names = Dict(
     "L1" => "\\mathbf{L_1}", 
     "logL1" => "\\textbf{log } \\mathbf{L_1}", 
@@ -58,12 +62,13 @@ for pen_str in PEN_STRS
     bic_by_rxs = Dict{Vector{Int64},Float64}();
     isol_by_rxs = Dict{Vector{Int64},ODEInferenceSol}();
     opt_dir = joinpath(@__DIR__, "output", pen_str)
-    est_mat = readdlm(joinpath(opt_dir, "refined_estimates.txt"))
+    est_mat = readdlm(joinpath(opt_dir, EST_FNAME))
+    @assert allunique(findall(isfinite.(est[1:n_rx])) for est in eachcol(est_mat))
     for est in eachcol(est_mat)
-        kvec = iprob.itf(est[1:end-n_species])
-        σs = exp.(est[end-n_species+1:end])
+        kvec = iprob.itf(est[1:n_rx])
+        σs = exp.(est[n_rx+1:end])
         isol = ODEInferenceSol(iprob, est, kvec, σs)
-        rxs = findall(isfinite.(est[1:end-n_species]))
+        rxs = findall(isfinite.(est[1:n_rx]))
         bic = 2*loss_func(kvec, σs) + length(rxs)*log(length(data))
         bic_by_rxs[rxs] = bic
         isol_by_rxs[rxs] = isol
@@ -203,8 +208,51 @@ begin
     rowgap!(f.layout, 2, 5)
     f
 end
-save(joinpath(fig_dir, "traj_post.png"), f);
+save(joinpath(fig_dir, PLT_FNAME), f);
 
+## Print all reactions with boxes 
+ltx_vec = [
+    begin 
+        s = string(rx_vec[rx])
+        s = s[findfirst(' ', s)+1:end]
+        s = Base.replace(s, "-->" => "&\\xrightarrow{k_{$rx}}")
+        s = Base.replace(s, "X" => "X_")
+        s = Base.replace(s, "*" => "")
+        # "\$$s\$"
+        rx ∈ gold_idxs ? "\\tikzmark{start$rx} $s \\tikzmark{end$rx}" : s
+    end for rx in 1:n_rx
+];
+for i in [68]
+    insert!(ltx_vec, i, " & ")
+end
+ltx_mat = reshape(ltx_vec, (17, 4));
+ltx_lines = [join(row, " & ")*"\\\\" for row in eachrow(ltx_mat)];
+println.(ltx_lines);
+for i in gold_idxs
+    println("\\draw[black,thick]([shift={(-0.3em,2.8ex)}]pic cs:start$i)rectangle([shift={(0.3em,-0.8ex)}]pic cs:end$i);")
+end
+
+## Print all reactions with bm
+ltx_vec = [
+    begin 
+        s = string(rx_vec[rx])
+        s = s[findfirst(' ', s)+1:end]
+        s = Base.replace(s, "-->" => (
+            rx ∈ gold_idxs ? 
+            "} & \\bm{\\xrightarrow{k_{$rx}}" :
+            "&\\xrightarrow{k_{$rx}}"
+        ))
+        s = Base.replace(s, "X" => "X_")
+        s = Base.replace(s, "*" => "")
+        rx ∈ gold_idxs ? "\\bm{$s}" : s
+    end for rx in 1:n_rx
+];
+for i in [68]
+    insert!(ltx_vec, i, " & ")
+end
+ltx_mat = reshape(ltx_vec, (17, 4));
+ltx_lines = [join(row, " & ")*"\\\\" for row in eachrow(ltx_mat)];
+println.(ltx_lines);
 
 # Shared reactions
 for pen_str in PEN_STRS
@@ -459,14 +507,14 @@ isol.iprob.loss_func(isol.kvec, isol.σs)
 isol.iprob.loss_func(mask_kvec(isol, tmp_infer), isol.σs)
 infer_reactions(isol, species_vec, rx_vec)[2]
 
-curr_init = [isol.est[tmp_infer];isol.est[end-n_species+1:end]];
+curr_init = [isol.est[tmp_infer];isol.est[n_rx+1:end]];
 refine_func = make_refine_func(isol, tmp_infer; alg, abstol);
 @time hess_init = ForwardDiff.hessian(refine_func, curr_init);
 eigvals(hess_init)
 
 function calc_hess_eigvals(idxs, pen_str)
     isol = isol_dict_lookup[pen_str][idxs];
-    curr_init = [isol.est[idxs];isol.est[end-n_species+1:end]];
+    curr_init = [isol.est[idxs];isol.est[n_rx+1:end]];
     refine_func = make_refine_func(isol, idxs; alg, abstol);
     cfg = ForwardDiff.HessianConfig(refine_func, curr_init);
     hess_init = ForwardDiff.hessian(refine_func, curr_init, cfg);
@@ -477,7 +525,7 @@ end
 # AutoVern7(KenCarp4())
 # AutoTsit5(Rosenbrock23()))
 
-curr_init = [isol.est[tmp_infer];isol.est[end-n_species+1:end]];
+curr_init = [isol.est[tmp_infer];isol.est[n_rx+1:end]];
 
 abstol = 1e-12;
 refine_func = make_refine_func(isol, tmp_infer; alg=AutoVern7(KenCarp4()), abstol=abstol);
@@ -536,7 +584,7 @@ eigvals(hess_eps)
 sum(log(e) for e in eigvals(hess_eps) if e > 0)
 
 # Before refining
-curr_init = [isol.est[tmp_infer];isol.est[end-n_species+1:end]];
+curr_init = [isol.est[tmp_infer];isol.est[n_rx+1:end]];
 hess_init = ForwardDiff.hessian(refine_func, curr_init);
 eigvals(hess_init)
 sum(log(e) for e in eigvals(hess_init) if e > 0)

@@ -2,14 +2,10 @@
 
 TODO
 
-## Optimisation initialisation
+## Optimisation settings
 
 TODO
 
-## Network inference
-
-TODO
-
-## Hyperparameter tuning
+## Mapping sparse estimates to networks
 
 TODO

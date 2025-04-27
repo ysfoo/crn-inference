@@ -9,6 +9,10 @@ include(joinpath(@__DIR__, "setup.jl"));
 include(joinpath(@__DIR__, "../../src/inference.jl"));
 include(joinpath(@__DIR__, "../eval_helper.jl"));
 
+NO_CROSS = false
+EST_FNAME = NO_CROSS ? "nocross_estimates.txt" : "refined_estimates.txt"
+PLT_FNAME = NO_CROSS ? "top_crns_nocross.png" : "top_crns_crossover.png"
+
 true_rxs = [1, 13, 18];
 t_grid = range(t_span..., 1000);
 
@@ -54,13 +58,15 @@ crn_mode_dict = Dict{Tuple, Vector{Int64}}();
     )
     bic_by_rxs = Dict{Vector{Int64},Float64}();
     isol_by_rxs = Dict{Vector{Int64},ODEInferenceSol}();
-    est_mat = readdlm(joinpath(data_dir, pen_str, "refined_estimates.txt"));
+    est_mat = readdlm(joinpath(data_dir, pen_str, EST_FNAME));
+    est_mat[findall(est_mat .≈ log(1e-6))] .= -Inf
     for est in eachcol(est_mat)
-        kvec = iprob.itf(est[1:end-n_species])
-        σs = exp.(est[end-n_species+1:end])
-        isol = ODEInferenceSol(iprob, est, kvec, σs)
-        rxs = findall(isfinite.(est[1:end-n_species]))
+        rxs = findall(exp.(est[1:n_rx]) .> 1e-6 + eps(Float64))
+        kvec = iprob.itf(est[1:n_rx])
+        σs = exp.(est[n_rx+1:end])
+        isol = ODEInferenceSol(iprob, est, kvec, σs)      
         bic = 2*iprob.loss_func(kvec, σs) + length(rxs)*log(length(data))
+        if (get(bic_by_rxs, rxs, Inf) < bic) continue end
         bic_by_rxs[rxs] = bic
         isol_by_rxs[rxs] = isol
     end
@@ -82,6 +88,64 @@ end
 ## Directory for evaluation plots
 eval_dir = joinpath(@__DIR__, "output/eval_figs");
 mkpath(eval_dir);
+
+## Top 20 CRNs
+f = begin
+    f = Figure(size=(1200, 1500));
+    cutoff_idx = 20
+    xticks = 5:5:cutoff_idx
+    for (j, k1) in enumerate(K1_VALS), (i, k18) in enumerate(reverse(K18_VALS))
+        bic_merged = Dict{Vector{Int64},Float64}();
+        logp_merged = Dict{Vector{Int64},Float64}();
+        for pen_str in PEN_STRS
+            bdict = bic_dict_lookup[(k1,k18,pen_str)]
+            for (rxs, bic) in bdict
+                if !haskey(bic_merged, rxs) || bic < bic_merged[rxs]
+                    bic_merged[rxs] = bic
+                    logp_merged[rxs] = -0.5*bic + logprior(length(rxs))
+                end
+            end
+        end
+        sort_bic_merged = sort(collect(bic_merged), by=(x)->x.second);
+        sort_logp_merged = sort(collect(logp_merged), by=(x)->x.second, rev=true);
+        n_merged = length(sort_logp_merged)
+
+        logZ = logsumexp(last.(sort_logp_merged));
+        post_merged =  Dict(rxs => exp(logj-logZ) for (rxs, logj) in sort_logp_merged);
+
+        ax1 = Axis(
+            f[2i-1,j],
+            ylabel="Log posterior", 
+            xlabel="CRNs sorted by post.", xticks=xticks, xlabelpadding=5.
+        );
+        ax2 = Axis(
+            f[2i,j], alignmode=Mixed(top=5.), yreversed=true,
+            yticks=(1:4, [L"$%$(pen_names_reg[pstr])$" for pstr in PEN_STRS]), height=80, #yticklabelsize=16,
+            limits=((nothing, nothing), (0.5, length(PEN_STRS)+0.5)), xticks=xticks, xaxisposition=:top, valign=:top,
+            xminorgridcolor=(:black, .7), xminorgridvisible=true, xminorticksvisible=false, xminorticks=1.5:1:(cutoff_idx-0.5),
+            yminorgridcolor=(:black, .7), yminorgridvisible=true, yminorticksvisible=false, yminorticks=1.5:1:(length(PEN_STRS)-0.5),
+        )
+        linkxaxes!(ax1, ax2)
+        crns, logps = zip(sort_logp_merged[1:min(cutoff_idx, n_merged)]...)
+        scatterlines!(ax1, collect(logps))
+        for (i, pen_str) in enumerate(PEN_STRS)
+            post_dict = post_dict_lookup[(k1,k18,pen_str)]
+            found_vec = haskey.(Ref(post_dict), crns)
+            idxs = findall(found_vec)
+            for idx in idxs
+                b = band!(ax2, [idx-0.5, idx+0.5], fill(i-0.5,2), fill(i+0.5,2), color=(palette[i+2],0.8))
+                translate!(b, 0, 0, -100)
+            end
+            size95 = min(length(top_95_dict[(k1,k18,pen_str)]), length(idxs))
+            # scatter!(ax2, idxs[1:size95], fill(i, size95), color=:grey, marker=:star5)
+        end       
+        xlims!(0.5, cutoff_idx+0.5)
+        rowgap!(f.layout, 2i-1, 5)
+        Label(f[2i-1,j], L"k_1=%$(k1), k_{18}=%$(k18)", valign=:top, fontsize=12, tellheight=false, tellwidth=false)
+    end
+    f
+end
+save(joinpath(eval_dir, PLT_FNAME), f);
 
 ## Network reconstruction
 tpos_dict = Dict(settings => length(rxs ∩ true_rxs) for (settings, rxs) in crn_mode_dict); # true positives
@@ -409,67 +473,62 @@ begin
     save(joinpath(eval_dir, "traj_err.png"), fig);
 end
 
+## Print all reactions
 
-## Top 20 CRNs
-f = begin
-    f = Figure(size=(1200, 1500));
-    cutoff_idx = 20
-    xticks = 5:5:cutoff_idx
-    for (j, k1) in enumerate(K1_VALS), (i, k18) in enumerate(reverse(K18_VALS))
-        bic_merged = Dict{Vector{Int64},Float64}();
-        logp_merged = Dict{Vector{Int64},Float64}();
-        for pen_str in PEN_STRS
-            bdict = bic_dict_lookup[(k1,k18,pen_str)]
-            for (rxs, bic) in bdict
-                if !haskey(bic_merged, rxs) || bic < bic_merged[rxs]
-                    bic_merged[rxs] = bic
-                    logp_merged[rxs] = -0.5*bic + logprior(length(rxs))
-                end
-            end
-        end
-        sort_bic_merged = sort(collect(bic_merged), by=(x)->x.second);
-        sort_logp_merged = sort(collect(logp_merged), by=(x)->x.second, rev=true);
-        n_merged = length(sort_logp_merged)
+ltx_vec = [
+    begin 
+        s = string(rx_vec[rx])
+        s = s[findfirst(' ', s)+1:end]
+        s = Base.replace(s, "-->" => "&\\xrightarrow{k_{$rx}}")
+        s = Base.replace(s, "X" => "X_")
+        s = Base.replace(s, "*" => "")
+        # "\$$s\$"
+        s
+    end for rx in 1:n_rx
+];
+ltx_mat = reshape(ltx_vec, (10, 3));
+ltx_lines = [join(row, " & ")*"\\\\" for row in eachrow(ltx_mat)];
+println.(ltx_lines);
 
-        logZ = logsumexp(last.(sort_logp_merged));
-        post_merged =  Dict(rxs => exp(logj-logZ) for (rxs, logj) in sort_logp_merged);
 
-        ax1 = Axis(
-            f[2i-1,j],
-            ylabel="Log posterior", 
-            xlabel="CRNs sorted by post.", xticks=xticks, xlabelpadding=5.
-        );
-        ax2 = Axis(
-            f[2i,j], alignmode=Mixed(top=5.), yreversed=true,
-            yticks=(1:4, [L"$%$(pen_names_reg[pstr])$" for pstr in PEN_STRS]), height=80, #yticklabelsize=16,
-            limits=((nothing, nothing), (0.5, length(PEN_STRS)+0.5)), xticks=xticks, xaxisposition=:top, valign=:top,
-            xminorgridcolor=(:black, .7), xminorgridvisible=true, xminorticksvisible=false, xminorticks=1.5:1:(cutoff_idx-0.5),
-            yminorgridcolor=(:black, .7), yminorgridvisible=true, yminorticksvisible=false, yminorticks=1.5:1:(length(PEN_STRS)-0.5),
-        )
-        linkxaxes!(ax1, ax2)
-        crns, logps = zip(sort_logp_merged[1:min(cutoff_idx, n_merged)]...)
-        scatterlines!(ax1, collect(logps))
-        for (i, pen_str) in enumerate(PEN_STRS)
-            # scatter!(ax2, (1:5).+i, fill(i, 5), color=palette[1])
-            post_dict = post_dict_lookup[(k1,k18,pen_str)]
-            found_vec = haskey.(Ref(post_dict), crns)
-            idxs = findall(found_vec)
-            for idx in idxs
-                b = band!(ax2, [idx-0.5, idx+0.5], fill(i-0.5,2), fill(i+0.5,2), color=(palette[i+2],0.8))
-                translate!(b, 0, 0, -100)
-            end
-            size95 = min(length(top_95_dict[(k1,k18,pen_str)]), length(idxs))
-            scatter!(ax2, idxs[1:size95], fill(i, size95), color=:grey, marker=:star5)
-        end       
-        xlims!(0.5, cutoff_idx+0.5)
-        rowgap!(f.layout, 2i-1, 5)
-        Label(f[2i-1,j], L"k_1=%$(k1), k_{18}=%$(k18)", valign=:top, fontsize=12, tellheight=false, tellwidth=false)
-    end
-    f
+## Analyse 95% HPD
+
+function contains_gt(crn)
+    return ([1] ⊆ crn) && (any(alt ⊆ crn for alt in [[13],[11,14],[12,15]])) && (any(alt ⊆ crn for alt in [[18],[16,19],[17,20]]))
 end
-save(joinpath(eval_dir, "compare_crns.png"), f);
 
+for k1 in K1_VALS, k18 in K18_VALS
+    for pen_str in PEN_STRS
+        println((k1, k18, pen_str))
+        other_post = 0.0
+        top_95 = top_95_dict[(k1, k18, pen_str)]
+        for crn in top_95
+            if contains_gt(crn) continue end
+            # println(crn)
+            other_post += post_dict_lookup[(k1, k18, pen_str)][crn]
+        end
+        other_post == 0.0 || println(other_post) # posterior prob. of other CRNs
+    end
+end
 
+# values of dimensionless parameter estimates
+dimless_ks = Vector{Float64}();
+for k1 in K1_VALS, k18 in K18_VALS
+    for pen_str in PEN_STRS
+        top_95 = top_95_dict[(k1, k18, pen_str)]
+        for crn in top_95
+            est = isol_dict_lookup[(k1, k18, pen_str)][crn].est
+            append!(dimless_ks, exp.(est[crn ∩ [1,13,18]]))
+        end
+    end
+end
+length(dimless_ks)
+sort(dimless_ks)
+hist(log10.(dimless_ks))
+mean(dimless_ks .> 10)
+mean(dimless_ks .< 1e-3)
+mean(dimless_ks .< 1e-4)
+extrema(dimless_ks)
 
 ## Temporary playground
 
@@ -510,8 +569,8 @@ est_mat = reduce(hcat, [
     for hyp_val in HYP_VALS]);
 sorted_vec = [
     begin
-        kvec = iprob.itf(est[1:end-n_species])
-        σs = exp.(est[end-n_species+1:end])
+        kvec = iprob.itf(est[1:n_rx])
+        σs = exp.(est[n_rx+1:end])
         isol = ODEInferenceSol(iprob, est, kvec, σs)
         sort_reactions(isol, species_vec, rx_vec; abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false)
     end for est in eachcol(est_mat)
@@ -521,8 +580,8 @@ est_vec = [
     if tmp_crn ⊆ sort_idxs[1:length(tmp_crn)]
 ];
 for est in est_vec[end-10:end]
-    kvec = iprob.itf(est[1:end-n_species])
-    σs = exp.(est[end-n_species+1:end])
+    kvec = iprob.itf(est[1:n_rx])
+    σs = exp.(est[n_rx+1:end])
     isol = ODEInferenceSol(iprob, est, kvec, σs)
     sorted_idxs = sort_reactions(isol, species_vec, rx_vec; abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false)
     loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
@@ -551,8 +610,8 @@ end
 bic_dict = map_isol(tmp_isol, species_vec, rx_vec; abstol=1e-10, verbose=false, thres=10.)
 
 for est in eachcol(est_mat)
-    kvec = iprob.itf(est[1:end-n_species])
-    σs = exp.(est[end-n_species+1:end])
+    kvec = iprob.itf(est[1:n_rx])
+    σs = exp.(est[n_rx+1:end])
     isol = ODEInferenceSol(iprob, est, kvec, σs)
     has_tmp_crn = any(issubset.(Ref(tmp_crn), keys(map_isol(isol, species_vec, rx_vec; abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false, thres=3))))
     if has_tmp_crn
@@ -587,6 +646,7 @@ true_rxs = [1,13,18];
 for trg_rxs in [[1,11,14,18],[1,12,15,18],[1,13,16,19],[1,13,17,20]]
 println(trg_rxs)
 in_post_vec = Vector{Int64}()
+in_95_vec = Vector{Int64}()
 mprob_vec = Vector{String}()
 modds_vec = Vector{String}()
 for pen_str in PEN_STRS
@@ -615,10 +675,12 @@ for pen_str in PEN_STRS
     # println("$in_95_ct times in 95% HPD, $in_post_ct times found, median prob. $(median(wvec))")
     # display(sort(wvec))
     push!(in_post_vec,in_post_ct)
+    push!(in_95_vec,in_95_ct)
     push!(mprob_vec, pyfmt(".4f", median(wvec)))
     push!(modds_vec, pyfmt(".4f", median(ovec)))
 end
 println(join([in_post_vec; modds_vec], " & "))
+println(join(in_95_vec, " & "))
 end
 
 
@@ -638,6 +700,20 @@ for p1 in 1:4
     end
 end
 
+# does 95% HPD include ground-truth CRN
+trg_rxs = [1,13,18];
+for pen_str in PEN_STRS
+    ct = 0
+    for k1 in K1_VALS, k18 in K18_VALS
+        settings = (k1,k18,pen_str)
+        ct += trg_rxs ∈ top_95_dict[settings]
+        if !(trg_rxs ∈ top_95_dict[settings])
+            println(settings)
+        end
+    end
+    println(ct)
+end
+
 # HPD coverage
 trg_rxs = [1,13,18];
 crits = Vector{Float64}();
@@ -649,15 +725,33 @@ for k1 in K1_VALS, k18 in K18_VALS
     push!(crits, sum(w for (_, w) in sort_by_w[1:w_rank]))
 end
 
-trg_rxs = [1,13,18];
-for pen_str in PEN_STRS
-    ct = 0
-    for k1 in K1_VALS, k18 in K18_VALS
-        settings = (k1,k18,pen_str)
-        ct += trg_rxs ∈ top_95_dict[settings]
-    end
-    println(ct)
-end
+k1=1;k18=10;
+tmp_sort = sort(
+    collect(post_dict_lookup[(k1,k18,"logL1")]),
+    by=last, rev=true
+);
+tmp_sort[1:10]
+
+post_dict_lookup[(k1,k18,"logL1")][trg_rxs]
+post_dict_lookup[(k1,k18,"approxL0")][trg_rxs]
+
+bic_dict_lookup[(k1,k18,"logL1")][trg_rxs]
+bic_dict_lookup[(k1,k18,"approxL0")][trg_rxs]
+
+isol_dict_lookup[(k1,k18,"logL1")][trg_rxs].σs
+isol_dict_lookup[(k1,k18,"approxL0")][trg_rxs].σs
+
+101/2*sum(log, isol_dict_lookup[(k1,k18,"logL1")][trg_rxs].σs)
+101/2*sum(log, isol_dict_lookup[(k1,k18,"approxL0")][trg_rxs].σs)
+
+tmp_isol = isol_dict_lookup[(k1,k18,"logL1")][trg_rxs];
+tmp_isol.iprob.loss_func(tmp_isol.kvec, tmp_isol.σs)
+
+other_isol = isol_dict_lookup[(k1,k18,"approxL0")][trg_rxs];
+tmp_isol.iprob.loss_func(other_isol.kvec, other_isol.σs)
+
+σ_lbs = 0.01.*init_σs_dict[(k1, k18)]
+std.(eachrow(tmp_isol.iprob.data))
 
 xs = range(0,1,101)
 scatter(xs, [sum(c >= 1-x for c in crits)/25 for x in xs])
@@ -708,22 +802,22 @@ end
 k1=.1;k18=10.;
 pen_str = "approxL0"
 settings = (k1,k18,pen_str);
-wdict = post_dict_lookup[settings]
+wdict = post_dict_lookup[settings];
 marg_mat = [sum(w for (rxs, w) in wdict if rx ∈ rxs) for rx in 1:30]
 near0 = findall(marg_mat .< 1e-6)
 
-wpairs = collect(post_dict_lookup[settings])
-ws = ProbabilityWeights(last.(wpairs))
+wpairs = collect(post_dict_lookup[settings]);
+ws = ProbabilityWeights(last.(wpairs));
 hasrx_vec = [Int.(rx .∈ first.(wpairs)) for rx in 1:n_rx]
 println(pen_str)
 # println(log(y1y30)+log(n1n30)-log(y1n30)-log(n1y30))
 cmat = cor(reduce(hcat, hasrx_vec), ws)
-rxpairs = [(i,j) for j in 1:n_rx, i in 1:n_rx if i < j]
-sort_by_c = sort(rxpairs, by=(tpl)->cmat[tpl[1],tpl[2]])
+rxpairs = [(i,j) for j in 1:n_rx, i in 1:n_rx if i < j];
+sort_by_c = sort(rxpairs, by=(tpl)->cmat[tpl[1],tpl[2]]);
 
 cmat[near0,:] .= NaN
 cmat[:,near0] .= NaN
-heatmap(cmat)
+heatmap(cmat, colormap=:RdBu, colorrange=(-1,1))
 
 fig = Figure()
 ax = Axis(
@@ -734,7 +828,7 @@ ax = Axis(
 )
 
 hm_mat = cmat;
-hm = heatmap!(hm_mat)
+hm = heatmap!(hm_mat, colormap=:RdBu, colorrange=(-1,1))
 Colorbar(
     fig[1, end+1], hm, label="Correlation", labelsize=16,
     labelrotation=π/2, ticklabelsize=16)

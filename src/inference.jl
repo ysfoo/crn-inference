@@ -74,7 +74,7 @@ function get_scale_fcts(smooth_resvec, t, species_vec, rx_vec, k)
 end
 
 
-### Functions to be called for parameter inference
+### Functions for parameter inference
 
 function strict_clamp(x, l, u, ϵ=1e-6)
 	return clamp(x, l+ϵ*(u-l), u-ϵ*(u-l))
@@ -184,35 +184,36 @@ struct ODEInferenceSol
 	σs
 end
 
-function make_isol(iprob, est_mat)
-	n_species = size(iprob.data, 1)
-	optim_vals = iprob.optim_func.(eachcol(est_mat))
-	est = est_mat[:,argmin(optim_vals)] # extract best run
-	kvec = iprob.itf(est[1:end-n_species])
-	σs = exp.(est[end-n_species+1:end])
-	return ODEInferenceSol(iprob, est, kvec, σs)
-end
+# function make_isol(iprob, est_mat)
+# 	n_species = size(iprob.data, 1)
+# 	optim_vals = iprob.optim_func.(eachcol(est_mat))
+# 	est = est_mat[:,argmin(optim_vals)] # extract best run
+# 	kvec = iprob.itf(est[1:end-n_species])
+# 	σs = exp.(est[end-n_species+1:end])
+# 	return ODEInferenceSol(iprob, est, kvec, σs)
+# end
 
 
-### Functions to be called for structural inference
+### Functions for structural inference
 
-function infer_reactions_prev(isol; thres=cquantile(Chisq(1), 1e-4)/2, print_diff=false)
-    loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
-    tmp_kvec = zeros(length(isol.kvec))
-    inferred = Vector{Int}()
-    for idx in reverse(sortperm(isol.kvec ./ isol.iprob.scale_fcts))
-		push!(inferred, idx)
-        tmp_kvec[idx] = isol.kvec[idx]
-		loss_diff = isol.iprob.loss_func(tmp_kvec, isol.σs) - loss_val
-		if print_diff
-			println(idx, " ", loss_diff)
-		end
-        if loss_diff < thres
-            break
-        end		
-    end
-	return (inferred, isol.iprob.loss_func(tmp_kvec, isol.σs))
-end
+# sort reactions by dimless rate constant, terminate when changing by one reaction does not change loss by much
+# function infer_reactions_prev(isol; thres=cquantile(Chisq(1), 1e-4)/2, print_diff=false)
+#     loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
+#     tmp_kvec = zeros(length(isol.kvec))
+#     inferred = Vector{Int}()
+#     for idx in reverse(sortperm(isol.kvec ./ isol.iprob.scale_fcts))
+# 		push!(inferred, idx)
+#         tmp_kvec[idx] = isol.kvec[idx]
+# 		loss_diff = isol.iprob.loss_func(tmp_kvec, isol.σs) - loss_val
+# 		if print_diff
+# 			println(idx, " ", loss_diff)
+# 		end
+#         if loss_diff < thres
+#             break
+#         end		
+#     end
+# 	return (inferred, isol.iprob.loss_func(tmp_kvec, isol.σs))
+# end
 
 function sort_reactions(isol, species_vec, rx_vec; 
 	                    n_itp=101, alg=DEF_SOLVER, kwargs...)
@@ -228,31 +229,31 @@ function sort_reactions(isol, species_vec, rx_vec;
 end
 
 # Decide which reactions are present in the system given estimated rate constants
-function infer_reactions(isol, species_vec, rx_vec; 
-	                     n_itp=50, thres=cquantile(Chisq(1), 1e-2)/2, print_diff=false,
-						 alg=DEF_SOLVER, kwargs...)
-	sorted_idxs = sort_reactions(
-		isol, species_vec, rx_vec; 
-		n_itp, alg, kwargs...
-	)	
-	loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
-    tmp_kvec = zeros(length(isol.kvec))
-	fit_val = missing
-    inferred = Vector{Int}()
-    for idx in sorted_idxs
-		push!(inferred, idx)
-        tmp_kvec[idx] = isol.kvec[idx]
-		fit_val = isol.iprob.loss_func(tmp_kvec, isol.σs)
-		loss_diff = fit_val - loss_val
-		if print_diff
-			println(idx, " ", loss_diff)
-		end
-        if loss_diff < thres
-            break
-        end		
-    end
-	return (inferred, fit_val)
-end
+# function infer_reactions(isol, species_vec, rx_vec; 
+# 	                     n_itp=50, thres=cquantile(Chisq(1), 1e-2)/2, print_diff=false,
+# 						 alg=DEF_SOLVER, kwargs...)
+# 	sorted_idxs = sort_reactions(
+# 		isol, species_vec, rx_vec; 
+# 		n_itp, alg, kwargs...
+# 	)	
+# 	loss_val = isol.iprob.loss_func(isol.kvec, isol.σs)
+#     tmp_kvec = zeros(length(isol.kvec))
+# 	fit_val = missing
+#     inferred = Vector{Int}()
+#     for idx in sorted_idxs
+# 		push!(inferred, idx)
+#         tmp_kvec[idx] = isol.kvec[idx]
+# 		fit_val = isol.iprob.loss_func(tmp_kvec, isol.σs)
+# 		loss_diff = fit_val - loss_val
+# 		if print_diff
+# 			println(idx, " ", loss_diff)
+# 		end
+#         if loss_diff < thres
+#             break
+#         end		
+#     end
+# 	return (inferred, fit_val)
+# end
 
 # Decide which reactions are present in the system given estimated rate constants
 function map_isol(isol, species_vec, rx_vec; 
@@ -283,16 +284,31 @@ function map_isol(isol, species_vec, rx_vec;
 	return Dict(sorted_idxs[1:s] => bic_vec[s] for s in crn_sizes)
 end
 
-# function est_σs_given_kvec(t_obs, data, oprob, setter, kvec; alg=DEF_SOLVER, kwargs...)
-# 	n_species = size(data, 1)
-# 	setter(oprob, kvec)
-# 	sol = solve(oprob, alg; saveat=t_obs, kwargs...)
-# 	if SciMLBase.successful_retcode(sol)
-# 		return std.(eachrow(sol[1:n_species,:] .- data); corrected=false, mean=0.)
-# 	else
-# 		return fill(Inf, n_species)
-# 	end
-# end
+function est_σs_given_kvec(iprob, kvec; alg=DEF_SOLVER, kwargs...)
+	n_species = size(iprob.data, 1)
+	oprob = remake(iprob.oprob; p=[iprob.k => kvec])
+	sol = solve(oprob, alg; saveat=iprob.t_obs, kwargs...)
+	if SciMLBase.successful_retcode(sol)
+		return std.(eachrow(sol[1:n_species,:] .- iprob.data); corrected=false, mean=0.)
+	else
+		return fill(Inf, n_species)
+	end
+end
+
+function find_diff_pair(crn1, crn2)
+    return Pair(setdiff(crn1, crn2), setdiff(crn2, crn1))
+end
+
+function translate_crn(crn, crn_diff)
+    sort(setdiff(crn, crn_diff.second) ∪ crn_diff.first)
+end
+
+function replace_est(base_est, replace_est, replace_rxs, delete_rxs=[], delete_val=-Inf)
+	est = copy(base_est)
+	est[delete_rxs] .= delete_val
+	est[replace_rxs] .= replace_est[replace_rxs]
+	return est
+end
 
 
 # Hyperparameter tuning via BIC
@@ -339,6 +355,41 @@ function tune_hyp_plateau(inferred_vec, fit_vec, thres=cquantile(Chisq(1), 1e-4)
 	return plat_start + idx - 1
 end
 
+function refine_isol(refine_func, iprob, init_est, idxs, 
+	σ_lbs=0., σ_ubs=Inf, k_lbs=1e-6, k_ubs=1e2;
+	optim_alg=BFGS(),
+	optim_opts=Optim.Options()
+)
+	n_species = size(iprob.data, 1)
+	init_vec = [init_est[idxs]; init_est[end-n_species+1:end]]
+	res = optimize(
+		refine_func, init_vec,
+		optim_alg, optim_opts;
+		autodiff = :forward
+	)
+	est = fill(-Inf, length(init_est))
+	est[idxs] .= clamp.(res.minimizer[1:length(idxs)], log.(k_lbs), log.(k_ubs))
+	est[end-n_species+1:end] .= clamp.(res.minimizer[end-n_species+1:end], log.(σ_lbs), log.(σ_ubs))
+	kvec = iprob.itf(est[1:end-n_species])
+	σs = exp.(est[end-n_species+1:end])
+	return ODEInferenceSol(iprob, est, kvec, σs), res
+end
+
+function make_refine_func(iprob, idxs, σ_lbs=0., σ_ubs=Inf, k_lbs=1e-6, k_ubs=1e2)
+	n_idxs = length(idxs)
+	n_species = size(iprob.data, 1)
+	scale_fcts = iprob.scale_fcts[idxs]
+	cache = DiffCache(zeros(length(iprob.k)))
+	function refine_func(u::Vector{T})::T where T		
+		kvec::Vector{T} = get_tmp(cache, u)
+		kvec .= zero(eltype(u))
+		kvec[idxs] .= clamp.(exp.(u[1:n_idxs]), k_lbs, k_ubs) .* scale_fcts
+		σs = clamp.(exp.(u[end-n_species+1:end]), σ_lbs, σ_ubs)
+		iprob.loss_func(kvec, σs)
+	end
+	return FunctionWrapper(refine_func)
+end
+
 
 
 ### Helper functions that do not need to be directly called when using this module
@@ -369,6 +420,26 @@ function make_loss_func(oprob, k, t_obs, data; alg=DEF_SOLVER, kwargs...)
     end
 end
 
+function make_estim_σs_func(oprob, k, t_obs, data; alg=DEF_SOLVER, kwargs...)
+	mtk_p = parameter_values(oprob) # MTK parameters object
+	param_vals, repack, _ = canonicalize(Tunable(), mtk_p)
+    cache = DiffCache(copy(param_vals));
+    setter = setp(oprob, k);
+	n_species = size(data, 1)
+    return function estim_σs_func(x::Vector{T})::Vector{T} where T
+        buffer = get_tmp(cache, x) # get pre-allocated buffer
+        copyto!(buffer, param_vals) # copy current values to buffer
+        repacked_p = repack(buffer) # replace tunable portion of mtk_p with buffer
+        setter(repacked_p, x) # set the updated values
+        remade_oprob = remake(oprob; p = repacked_p)
+        sol = solve(remade_oprob, alg; saveat=t_obs, kwargs...)
+        if !SciMLBase.successful_retcode(sol)
+            return fill(Inf, n_species)
+        end
+		return std.(eachrow(sol[1:n_species,:] .- data); corrected=false, mean=0.)
+    end
+end
+
 # function refine_isol(isol, idxs, lbs, ubs,
 # 	optim_alg=Fminbox(BFGS(linesearch = LineSearches.BackTracking())),
 # 	optim_opts=Optim.Options(x_abstol=1e-10, f_abstol=1e-10, outer_x_abstol=1e-10, outer_f_abstol=1e-10)
@@ -390,40 +461,6 @@ end
 # 	σs = exp.(est[end-n_species+1:end])
 # 	return ODEInferenceSol(isol.iprob, est, kvec, σs), res, refine_func
 # end
-
-function refine_isol(refine_func, isol, idxs, σ_lbs=0., σ_ubs=Inf;
-	optim_alg=BFGS(),
-	optim_opts=Optim.Options()
-)
-	n_species = length(isol.σs)
-	init_vec = [isol.est[idxs]; isol.est[end-n_species+1:end]]
-	res = optimize(
-		refine_func, init_vec,
-		optim_alg, optim_opts;
-		autodiff = :forward
-	)
-	est = fill(-Inf, length(isol.est))
-	est[idxs] .= res.minimizer[1:length(idxs)]
-	est[end-n_species+1:end] .= clamp.(res.minimizer[end-n_species+1:end],  log.(σ_lbs), log.(σ_ubs))
-	kvec = isol.iprob.itf(est[1:end-n_species])
-	σs = exp.(est[end-n_species+1:end])
-	return ODEInferenceSol(isol.iprob, est, kvec, σs), res, refine_func
-end
-
-function make_refine_func(iprob, idxs, σ_lbs=0., σ_ubs=Inf)
-	n_idxs = length(idxs)
-	n_species = size(iprob.data, 1)
-	scale_fcts = iprob.scale_fcts[idxs]
-	cache = DiffCache(zeros(length(iprob.k)))
-	function refine_func(u::Vector{T})::T where T		
-		kvec::Vector{T} = get_tmp(cache, u)
-		kvec .= zero(eltype(u))
-		kvec[idxs] .= exp.(u[1:n_idxs]) .* scale_fcts
-		σs = clamp.(exp.(u[end-n_species+1:end]), σ_lbs, σ_ubs)
-		iprob.loss_func(kvec, σs)
-	end
-	return FunctionWrapper(refine_func)
-end
 
 # Penalty functions on parameters
 # Some of these can be interpreted as the negative log density of some prior distribution
