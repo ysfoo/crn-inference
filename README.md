@@ -4,7 +4,7 @@ Project during MATRIX program "Parameter Identifiability in Mathematical Biology
 
 This repository provides Julia code for inferring the structure of a chemical reaction network (CRN) from noisy time series data of species concentrations. Our approach is based on constructing a system of ordinary differential equations (ODEs) from a library of candidate reactions, and subsequently performing parameter inference to estimate the reaction rate constants. Reactions with non-negligible rate constant estimates are deduced to be present in the network. 
 
-The Jupyter notebook `crn_inference_tutorial.ipynb` features a standalone demo of CRN inference. The `src/` directory provides functionality for CRN data simulation, parameter inference, network inference, and hyperparameter tuning. See `test/` for applications.
+The Jupyter notebook `crn_inference_tutorial.ipynb` features a standalone, simplified demo of CRN inference. The `src/` directory provides functionality for CRN data simulation, parameter inference, network inference, and hyperparameter tuning. See `test/` for applications.
 
 Parameter estimation is done in a frequentist fashion via maximising a penalised likelihood. To this end, we use a multi-start first-order optimisation algorithm, aided by automatic differentiation. A penalty function is used to encourage parsimonious model fits to the data. The implemented penalty functions are as follows:
 - $L_1$ penalty on the original scale, i.e. an exponential prior,
