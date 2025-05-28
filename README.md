@@ -1,4 +1,6 @@
-# Chemical reaction network inference
+# Strucutral uncertainty for reaction network inference
+
+**A preprint of this work is available on [arXiv](https://arxiv.org/abs/2505.15653).**
 
 Project during MATRIX program "Parameter Identifiability in Mathematical Biology" (Sep 2024).
 
