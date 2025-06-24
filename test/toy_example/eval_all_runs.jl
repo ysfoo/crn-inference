@@ -9,11 +9,13 @@ include(joinpath(@__DIR__, "setup.jl"));
 include(joinpath(@__DIR__, "../../src/inference.jl"));
 include(joinpath(@__DIR__, "../eval_helper.jl"));
 
-NO_CROSS = false
-EST_FNAME = NO_CROSS ? "nocross_estimates.txt" : "refined_estimates.txt"
-PLT_FNAME = NO_CROSS ? "top_crns_nocross.png" : "top_crns_crossover.png"
+# NO_CROSS = false
+# EST_FNAME = NO_CROSS ? "nocross_estimates.txt" : "refined_estimates.txt"
+# PLT_FNAME = NO_CROSS ? "top_crns_nocross.png" : "top_crns_crossover.png"
 
 true_rxs = [1, 13, 18];
+equiv_crns = [[1,11,14,18],[1,12,15,18],[1,13,16,19],[1,13,17,20]];
+# [[true_rxs]; equiv_crns]
 t_grid = range(t_span..., 1000);
 
 scale_dict = Dict{Tuple{Float64,Float64}, Vector{Float64}}();
@@ -46,6 +48,7 @@ post_dict_lookup = Dict{Tuple, Dict{Vector{Int64},Float64}}();
 isol_dict_lookup = Dict{Tuple, Dict{Vector{Int64},ODEInferenceSol}}();
 top_95_dict = Dict{Tuple, Vector{Vector{Int64}}}();
 crn_mode_dict = Dict{Tuple, Vector{Int64}}();
+base_crns_dict = Dict{Tuple, Set{Vector{Int64}}}()
 
 @showprogress for (k1, k18, pen_str) in Iterators.product(K1_VALS, K18_VALS, PEN_STRS)
     settings = (k1, k18, pen_str);
@@ -58,8 +61,8 @@ crn_mode_dict = Dict{Tuple, Vector{Int64}}();
     )
     bic_by_rxs = Dict{Vector{Int64},Float64}();
     isol_by_rxs = Dict{Vector{Int64},ODEInferenceSol}();
-    est_mat = readdlm(joinpath(data_dir, pen_str, EST_FNAME));
-    est_mat[findall(est_mat .≈ log(1e-6))] .= -Inf
+    est_mat = readdlm(joinpath(data_dir, pen_str, "refined_estimates.txt"));
+    # est_mat[findall(est_mat .≈ log(1e-6))] .= -Inf
     for est in eachcol(est_mat)
         rxs = findall(exp.(est[1:n_rx]) .> 1e-6 + eps(Float64))
         kvec = iprob.itf(est[1:n_rx])
@@ -81,6 +84,19 @@ crn_mode_dict = Dict{Tuple, Vector{Int64}}();
     cutoff_logp = sort(collect(values(logps)), rev=true)[cutoff_idx]
     top_95_dict[settings] = [rxs for (rxs, logp) in logps if logp >= cutoff_logp]
     crn_mode_dict[settings] = argmax(x->posts[x], keys(posts))
+
+    base_crns = Set{Vector{Int64}}();
+    opt_dir = joinpath(@__DIR__, "output", pen_str)
+    est_mat = readdlm(joinpath(data_dir, pen_str, "nocross_estimates.txt"))
+    # est_mat[findall(est_mat .≈ log(1e-6))] .= -Inf
+    for est in eachcol(est_mat)
+        kvec = iprob.itf(est[1:n_rx])
+        σs = exp.(est[n_rx+1:end])
+        isol = ODEInferenceSol(iprob, est, kvec, σs)
+        rxs = findall(isfinite.(est[1:n_rx]))
+        push!(base_crns, sort(rxs))
+    end
+    base_crns_dict[settings] = base_crns
 end
 
 ### Plots for papaer
@@ -91,7 +107,7 @@ mkpath(eval_dir);
 
 ## Top 20 CRNs
 f = begin
-    f = Figure(size=(1200, 1500));
+    f = Figure(size=(1200, 1500), figure_padding=(5,5,5,20));
     cutoff_idx = 20
     xticks = 5:5:cutoff_idx
     for (j, k1) in enumerate(K1_VALS), (i, k18) in enumerate(reverse(K18_VALS))
@@ -115,12 +131,13 @@ f = begin
 
         ax1 = Axis(
             f[2i-1,j],
-            ylabel="Log posterior", 
+            # title=i==1 ? L"k_1=%$k1" : "",
+            ylabel=j==1 ? "Unnormalised log post." : "", 
             xlabel="CRNs sorted by post.", xticks=xticks, xlabelpadding=5.
         );
         ax2 = Axis(
             f[2i,j], alignmode=Mixed(top=5.), yreversed=true,
-            yticks=(1:4, [L"$%$(pen_names_reg[pstr])$" for pstr in PEN_STRS]), height=80, #yticklabelsize=16,
+            yticks=(1:4, [j==1 ? L"$%$(pen_names_reg[pstr])$" : "" for pstr in PEN_STRS]), height=80, #yticklabelsize=16,
             limits=((nothing, nothing), (0.5, length(PEN_STRS)+0.5)), xticks=xticks, xaxisposition=:top, valign=:top,
             xminorgridcolor=(:black, .7), xminorgridvisible=true, xminorticksvisible=false, xminorticks=1.5:1:(cutoff_idx-0.5),
             yminorgridcolor=(:black, .7), yminorgridvisible=true, yminorticksvisible=false, yminorticks=1.5:1:(length(PEN_STRS)-0.5),
@@ -129,23 +146,83 @@ f = begin
         crns, logps = zip(sort_logp_merged[1:min(cutoff_idx, n_merged)]...)
         scatterlines!(ax1, collect(logps))
         for (i, pen_str) in enumerate(PEN_STRS)
-            post_dict = post_dict_lookup[(k1,k18,pen_str)]
+            settings = (k1,k18,pen_str)
+            post_dict = post_dict_lookup[settings]
             found_vec = haskey.(Ref(post_dict), crns)
             idxs = findall(found_vec)
             for idx in idxs
-                b = band!(ax2, [idx-0.5, idx+0.5], fill(i-0.5,2), fill(i+0.5,2), color=(palette[i+2],0.8))
+                highlight = crns[idx] ∈ [[true_rxs]; equiv_crns]
+                b = band!(
+                    ax2, [idx-0.5, idx+0.5], fill(i-0.5,2), fill(i+0.5,2), 
+                    color=palette[i+2],
+                    # color=highlight ? lighten(palette[i+2], 0.8) : darken(palette[i+2], 0.9)
+                )
                 translate!(b, 0, 0, -100)
             end
-            size95 = min(length(top_95_dict[(k1,k18,pen_str)]), length(idxs))
+            comb_found_vec = .!(in.(first.(sort_logp_merged[idxs]), Ref(base_crns_dict[settings])))
+            comb_idxs = idxs[findall(comb_found_vec)]
+            scatter!(ax2, comb_idxs, fill(i, length(comb_idxs)), color=:grey20, marker=:star5)
+            # size95 = min(length(top_95_dict[(k1,k18,pen_str)]), length(idxs))
             # scatter!(ax2, idxs[1:size95], fill(i, size95), color=:grey, marker=:star5)
-        end       
+            # Label(f[2i-1,6], L"k_{18}=%$(K18_VALS[i])", fontsize=16, halign=:left, tellheight=false)
+        end 
         xlims!(0.5, cutoff_idx+0.5)
         rowgap!(f.layout, 2i-1, 5)
-        Label(f[2i-1,j], L"k_1=%$(k1), k_{18}=%$(k18)", valign=:top, fontsize=12, tellheight=false, tellwidth=false)
+        colgap!(f.layout, 10)
+        # colgap!(f.layout, 5, 5)
+        Label(f[2i-1,j], L"k_1=%$(k1), \; k_{18}=%$(k18)", valign=:top, fontsize=16, tellheight=false, tellwidth=false)
     end
     f
 end
-save(joinpath(eval_dir, PLT_FNAME), f);
+save(joinpath(eval_dir, "top_crns.svg"), f);
+
+## Plot all data
+f = begin
+    f = Figure(size=(1000, 1000), figure_padding=5);
+    for (j, k1) in enumerate(K1_VALS), (i, k18) in enumerate(reverse(K18_VALS))
+        ax = Axis(
+            f[i,j],
+            ylabel=j==1 ? "Concentration" : "", 
+            xlabel=i==5 ? L"t" : "",
+            title=i==1 ? L"k_1=%$k1" : "",
+            #yscale=Makie.pseudolog10,
+        );
+        data_dir = get_data_dir(k1, k18);
+        t_obs, data = read_data(joinpath(data_dir, "data.txt"));
+        scale_fcts = scale_dict[(k1, k18)];
+        iprob = make_iprob(
+            oprob, k, t_obs, data, PEN_STRS[1], HYP_VALS[1]; 
+            scale_fcts, abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false
+        );
+        true_kvec = make_true_kvec(k1, k18)
+        oprob = remake(iprob.oprob, p=[k => true_kvec], u0=x0_map)
+        sol_grid = solve(oprob)(t_grid).u
+        for j in 1:3
+            scatter!(ax, t_obs, data[j,:], color=(palette[j], 0.6), markersize=8)
+            lines!(ax, t_grid, getindex.(sol_grid, j), color=darken(palette[j], 0.8), linewidth=2)
+        end
+    end
+    for i in 1:5
+        Label(f[i,6], L"k_{18}=%$(K18_VALS[i])", fontsize=16, halign=:left, tellheight=false)
+    end
+    colgap!(f.layout, 5, 5)
+    Label(
+        f[0,:], "Ground-truth trajectories and simulated data", font=:bold, fontsize=20,
+    )
+    Legend(
+        f[6,:],
+        [[
+            LineElement(color=darken(palette[j],0.8), linestyle=nothing),
+            MarkerElement(color=palette[j], marker=:circle)
+        ] for j in 1:3],
+        [L"X_{%$j}" for j in 1:3],
+        labelsize=18,
+        orientation=:horizontal
+    )
+    f
+end
+save(joinpath(eval_dir, "all_data.png"), f);
+
 
 ## Network reconstruction
 tpos_dict = Dict(settings => length(rxs ∩ true_rxs) for (settings, rxs) in crn_mode_dict); # true positives
@@ -394,7 +471,7 @@ for k1 in K1_VALS, k18 in K18_VALS, pen_str in PEN_STRS
     isol = isol_dict_lookup[settings][crn]    
     est_kvec = mask_kvec(isol, crn_mode_dict[settings]) # zero out non-inferred reactions
     traj_err_dict[settings] = get_traj_err(
-        est_kvec, true_kvec, isol.iprob.oprob, k, t_grid
+        est_kvec, true_kvec, isol.iprob.oprob, k, t_grid; u0=x0_map
     )
     pred_err_dict[settings] = get_traj_err(
         est_kvec, true_kvec, isol.iprob.oprob, k, t_grid; u0=x0_altmap
@@ -629,21 +706,27 @@ for pen_str in PEN_STRS
         for k1 in K1_VALS, k18 in K18_VALS
     ]
     display(extrema(means))
-    display(sum(means .> 4.24))
+    display(sum(means .> 4.5))
 end
+
+[
+    begin
+        argmax(pen_str->sum(length(rxs)*w for (rxs, w) in post_dict_lookup[(k1,k18,pen_str)]), PEN_STRS)
+    end for k1 in K1_VALS, k18 in K18_VALS
+]
 
 # HPD sizes
 for pen_str in PEN_STRS
     sizes = [
-        length(top_95_dict[(k1,k18,pen_str)])
+        length(post_dict[(k1,k18,pen_str)])
         for k1 in K1_VALS, k18 in K18_VALS
     ]
     display(sort(collect(countmap(sizes))))
 end
 
 true_rxs = [1,13,18];
-# for trg_rxs in [[1,13,18]]
-for trg_rxs in [[1,11,14,18],[1,12,15,18],[1,13,16,19],[1,13,17,20]]
+alts = [[1,11,14,18],[1,12,15,18],[1,13,16,19],[1,13,17,20]];
+for trg_rxs in [[true_rxs]; alts]
 println(trg_rxs)
 in_post_vec = Vector{Int64}()
 in_95_vec = Vector{Int64}()
@@ -679,7 +762,8 @@ for pen_str in PEN_STRS
     push!(mprob_vec, pyfmt(".4f", median(wvec)))
     push!(modds_vec, pyfmt(".4f", median(ovec)))
 end
-println(join([in_post_vec; modds_vec], " & "))
+# println(join([in_post_vec; modds_vec], " & "))
+println(join(in_post_vec, " & "))
 println(join(in_95_vec, " & "))
 end
 
@@ -725,6 +809,12 @@ for k1 in K1_VALS, k18 in K18_VALS
     push!(crits, sum(w for (_, w) in sort_by_w[1:w_rank]))
 end
 
+xs = range(0,1,101)
+scatter(xs, [sum(c >= 1-x for c in crits)/25 for x in xs])
+lines!([0,1],[0,1],color=:black,alpha=0.5,linestyle=:dash)
+current_figure()
+
+
 k1=1;k18=10;
 tmp_sort = sort(
     collect(post_dict_lookup[(k1,k18,"logL1")]),
@@ -752,11 +842,6 @@ tmp_isol.iprob.loss_func(other_isol.kvec, other_isol.σs)
 
 σ_lbs = 0.01.*init_σs_dict[(k1, k18)]
 std.(eachrow(tmp_isol.iprob.data))
-
-xs = range(0,1,101)
-scatter(xs, [sum(c >= 1-x for c in crits)/25 for x in xs])
-lines!([0,1],[0,1],color=:black,alpha=0.5,linestyle=:dash)
-current_figure()
 
 # list CRNs in 95% HPD
 k1=.1;k18=10.;

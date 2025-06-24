@@ -20,7 +20,7 @@ isslurmjob() ? pinthreads(:affinitymask) : pinthreads(:cores);
 include(joinpath(@__DIR__, "../../src/inference.jl")); # imports functions used for inference
 include(joinpath(@__DIR__, "setup.jl"));
 
-MAX_DIST = 0; # 0 for no crossover
+MAX_DIST = 2; # 0 for no crossover
 MAX_DIFFS = 1000;
 EST_FNAME = (MAX_DIST == 0) ? "nocross_estimates.txt" : "refined_estimates.txt"
 
@@ -43,6 +43,8 @@ end
 logprior(n) = -logabsbinomial(n_rx, n)[1] - log(n_rx+1)
 
 for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
+    println((k1, k18))
+    flush(stdout)
     refine_func_dict = Dict{Vector{Int64}, FunctionWrapper}();
     data_dir = get_data_dir(k1, k18);
     t_obs, data = read_data(joinpath(data_dir, "data.txt"));
@@ -51,8 +53,6 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
     σ_ubs = std.(eachrow(data))
 
     for pen_str in PEN_STRS
-        println((k1, k18, pen_str))
-        flush(stdout)
         bic_by_rxs = Dict{Vector{Int64},Float64}();
         isol_by_rxs = Dict{Vector{Int64},ODEInferenceSol}();
         iprob = make_iprob(
@@ -67,7 +67,11 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
                 kvec = iprob.itf(est[1:n_rx])
                 σs = exp.(est[n_rx+1:end])
                 isol = ODEInferenceSol(iprob, est, kvec, σs)
-                bic_dict = map_isol(isol, species_vec, rx_vec; abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false, thres=10.)
+                bic_dict = map_isol(
+                    isol, species_vec, rx_vec;
+                    estim_σs_func=estim_σs_func,
+                    abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false, thres=log(1e6)
+                )
                 for (crn, bic) in bic_dict
                     mask_est = copy(est)
                     crn = sort(crn)
@@ -86,7 +90,11 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
             by=last
         )
         max_logp = sort_by_logp[1].second
+        thres = max(log(1e6), max_logp-sort_by_logp[25].second)
         n_crns = length(isol_by_rxs)
+        top_crns = [crn for (crn, logp) in sort_by_logp if max_logp - logp <= thres];
+        n_top = length(top_crns)
+        max_crn_size = maximum(length.(top_crns))
 
         all_diffs = Dict{Pair{Vector{Int64},Vector{Int64}}, Vector{Tuple{Float64,Vector{Int64}}}}(); # map (alt reactions, replaced reactions) to vector of (loss diff, CRN with alt reactions)
         for crn1 in keys(isol_by_rxs), crn2 in keys(isol_by_rxs)
@@ -104,17 +112,15 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
             end
         end
         sort_diffs = sort(collect(all_diffs), by=x->minimum(first.(x.second)))
-        min_thres = findfirst(d->d[1]==Pair([],[]), sort_diffs)
-        crn_diffs = Dict(crn_diff => last.(alt_vec) for (crn_diff, alt_vec) in sort_diffs[1:clamp(MAX_DIFFS, min_thres, length(all_diffs))])
+        crn_diffs = Dict(crn_diff => last.(alt_vec) for (crn_diff, alt_vec) in sort_diffs[1:min(MAX_DIFFS, length(all_diffs))])
 
-        n_top = clamp(findall(x->max_logp-x.second<log(1e5), sort_by_logp)[end], min(25, n_crns), min(100, n_crns))
-        top_crns = first.(sort_by_logp)[1:n_top];
         cand_ests = Dict{Vector{Int64}, Tuple{Float64,Vector{Float64}}}(); # map CRN to (loss, estimate)
-        for crn in top_crns
+        @time for crn in top_crns
             isol = isol_by_rxs[crn]
             for (crn_diff, alt_crns) in crn_diffs
                 crn_diff.second ⊆ crn || continue # CRN needs to include all reactions to be replaced
                 cand_crn = translate_crn(crn, crn_diff)
+                # if length(cand_crn) > max_crn_size continue end
                 for alt_crn in alt_crns
                     rep_est = replace_est(isol.est, isol_by_rxs[alt_crn].est, crn_diff.first, crn_diff.second)
                     rep_kvec = iprob.itf(rep_est[1:n_rx])
@@ -130,20 +136,19 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
                 end
             end
         end    
-        cand_bics = Dict(crn => 2*fit+log(length(data))*length(crn) for (crn, (fit, est)) in cand_ests)
-        cand_logps = Dict(crn => -fit-0.5*log(length(data))*length(crn)+logprior(length(crn)) for (crn, (fit, est)) in cand_ests)
-
-        sort_by_logp = sort(collect(cand_logps), by=last, rev=true)
-        n_crns = length(cand_logps)
-        n_refine = clamp(findall(x->max_logp-x.second<log(1e5), sort_by_logp)[end], min(25, n_crns), min(1000, n_crns))       
-        to_refine = [(crn, cand_ests[crn][2]) for (crn, logp) in sort_by_logp[1:n_refine]]
-        display((pen_str, n_top, length(cand_logps), n_refine))
+        cand_bics = Dict(crn => 2*fit+log(length(data))*length(crn) for (crn, (fit, est)) in cand_ests);
+        cand_logps = Dict(crn => -fit-0.5*log(length(data))*length(crn)+logprior(length(crn)) for (crn, (fit, est)) in cand_ests);
+        sort_by_logp = sort(collect(cand_logps), by=last, rev=true);
+        n_cands = length(cand_logps);
+        n_refine = min(n_cands, 1000)#clamp(findall(x->max_logp-x.second<log(1e10), sort_by_logp)[end], min(25, n_crns), min(1000, n_crns));  
+        to_refine = [(crn, cand_ests[crn][2]) for (crn, logp) in sort_by_logp[1:n_refine]];
+        display((pen_str, n_crns, n_top, max_crn_size, length(all_diffs), n_cands, n_refine));
         
         print([any(crn==alt for (crn, _) in to_refine) ? "true" : "false" for alt in alts])
         print(" ")
         println([findfirst(x->x.first==alt, sort_by_logp) for alt in alts])
         flush(stdout)
-        
+                
         for (crn, est) in to_refine
             if !haskey(refine_func_dict, crn)
                 iprob = make_iprob(
@@ -152,11 +157,7 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
                 );
                 refine_func_dict[crn] = make_refine_func(iprob, crn, σ_lbs, σ_ubs)
             end
-        end        
-
-        # loss_by_rxs = Dict(crn => begin
-        #     iprob.loss_func(isol.kvec, isol.σs)
-        # end for (crn, isol) in isol_by_rxs)
+        end
 
         dict_lock = ReentrantLock()
         enumerate_crns = collect(enumerate(to_refine))
@@ -179,17 +180,6 @@ for (k1, k18) in collect(Iterators.product(K1_VALS, K18_VALS))
                     )
                 end
                 @lock dict_lock isol_by_rxs[crn] = refined_isol
-                # @lock dict_lock begin
-                #     if refine_res.minimum < get(loss_by_rxs, crn, Inf)
-                #         isol_by_rxs[crn] = refined_isol
-                #         loss_by_rxs[crn] = refine_res.minimum
-                #     end
-                # end
-                # println(crn)
-                # println("$i $(refine_res.iterations) $(refine_res.f_calls) $(refine_res.g_calls) $(refine_res.time_run)")
-                # refined_bic = 2*refine_res.minimum + length(crn)*log(length(data))
-                # println("$(round(cand_logps[crn];digits=4)) $(round(-iprob.loss_func(isol.kvec, isol.σs)-0.5*log(length(data))*length(crn)+logprior(length(crn));digits=4))")
-                # flush(stdout)
             end
         end
 

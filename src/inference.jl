@@ -54,7 +54,7 @@ function get_scale_fcts(smooth_resvec, t, species_vec, rx_vec, k)
 	);
 	est_trajs = [eval_spline(basis, β, t) for (basis, β) in smooth_resvec];
 
-	rates_vec = substitute.(oderatelaw.(rx_vec), Ref([k => ones(length(k))]));
+	rates_vec = substitute.(oderatelaw.(rx_vec, combinatoric_ratelaw=false), Ref([k => ones(length(k))]));
 	n_itp = length(est_trajs[1]);
 	return [
 		begin
@@ -218,7 +218,7 @@ end
 function sort_reactions(isol, species_vec, rx_vec; 
 	                    n_itp=101, alg=DEF_SOLVER, kwargs...)
 	setter = setp(isol.iprob.oprob, isol.iprob.k)
-	ratelaws = substitute.(oderatelaw.(rx_vec), Ref(Dict(k => isol.kvec)));
+	ratelaws = substitute.(oderatelaw.(rx_vec, combinatoric_ratelaw=false), Ref(Dict(k => isol.kvec)));
 	t_itp = range(extrema(isol.iprob.t_obs)..., n_itp)
 	setter(isol.iprob.oprob, isol.kvec)
 	sol = solve(isol.iprob.oprob, alg; saveat=t_itp, kwargs...)
@@ -257,6 +257,7 @@ end
 
 # Decide which reactions are present in the system given estimated rate constants
 function map_isol(isol, species_vec, rx_vec; 
+	estim_σs_func=kvec->isol.σs,
 	n_itp=50, thres=5.0, min_k_dimless=1e-6,
 	alg=DEF_SOLVER, kwargs...)
 	sorted_idxs = sort_reactions(
@@ -275,8 +276,8 @@ function map_isol(isol, species_vec, rx_vec;
 			break
 		end
 		tmp_kvec[idx] = isol.kvec[idx]
-		tmp_loss = isol.iprob.loss_func(tmp_kvec, isol.σs)
-		tmp_bic = 2*tmp_loss + log(n_data)*i
+		tmp_loss = isol.iprob.loss_func(tmp_kvec, estim_σs_func(tmp_kvec))
+		tmp_bic = 2*tmp_loss + log(n_data)*i				
 		push!(bic_vec, tmp_bic)
 		best_bic = min(best_bic, tmp_bic)
 	end
@@ -296,7 +297,7 @@ function est_σs_given_kvec(iprob, kvec; alg=DEF_SOLVER, kwargs...)
 end
 
 function find_diff_pair(crn1, crn2)
-    return Pair(setdiff(crn1, crn2), setdiff(crn2, crn1))
+    return Pair(sort(setdiff(crn1, crn2)), sort(setdiff(crn2, crn1)))
 end
 
 function translate_crn(crn, crn_diff)

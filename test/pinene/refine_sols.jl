@@ -20,7 +20,7 @@ isslurmjob() ? pinthreads(:affinitymask) : pinthreads(:cores);
 include(joinpath(@__DIR__, "../../src/inference.jl")); # imports functions used for inference
 include(joinpath(@__DIR__, "setup.jl"));
 
-MAX_DIST = 2; # 0 for no crossover
+MAX_DIST = 0; # 0 for no crossover
 MAX_DIFFS = 1000;
 EST_FNAME = (MAX_DIST == 0) ? "nocross_estimates.txt" : "refined_estimates.txt"
 
@@ -40,14 +40,18 @@ for pen_str in PEN_STRS
         scale_fcts, abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false
     );
     estim_σs_func = make_estim_σs_func(iprob.oprob, iprob.k, iprob.t_obs, iprob.data; abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false)
-    for hyp_val in HYP_VALS
+    @time for hyp_val in HYP_VALS
         opt_dir = get_opt_dir(pen_str, hyp_val);       
         est_mat = readdlm(joinpath(opt_dir, "estimates.txt"));
         for est in eachcol(est_mat)
             kvec = iprob.itf(est[1:n_rx])
             σs = exp.(est[n_rx+1:end])
             isol = ODEInferenceSol(iprob, est, kvec, σs)
-            bic_dict = map_isol(isol, species_vec, rx_vec; abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false, thres=10.)
+            bic_dict = map_isol(
+                isol, species_vec, rx_vec;
+                estim_σs_func=estim_σs_func,
+                abstol=1e-10, alg=AutoVern7(KenCarp4()), verbose=false, thres=log(1e6)
+            )
             for (crn, bic) in bic_dict
                 crn = sort(crn)
                 mask_est = copy(est)
@@ -60,13 +64,18 @@ for pen_str in PEN_STRS
             end
         end
     end
+    flush(stdout)
     
     sort_by_logp = sort(
         collect(Dict(rxs => -0.5*bic+logprior(length(rxs)) for (rxs, bic) in bic_by_rxs)), rev=true,
         by=last
     )
     max_logp = sort_by_logp[1].second
+    thres = max(log(1e6), max_logp-sort_by_logp[25].second)
     n_crns = length(isol_by_rxs)
+    top_crns = [crn for (crn, logp) in sort_by_logp if max_logp - logp <= thres];
+    n_top = length(top_crns)
+    max_crn_size = maximum(length.(top_crns))
 
     all_diffs = Dict{Pair{Vector{Int64},Vector{Int64}}, Vector{Tuple{Float64,Vector{Int64}}}}(); # map (alt reactions, replaced reactions) to vector of (loss diff, CRN with alt reactions)
     for crn1 in keys(isol_by_rxs), crn2 in keys(isol_by_rxs)
@@ -84,17 +93,15 @@ for pen_str in PEN_STRS
         end
     end
     sort_diffs = sort(collect(all_diffs), by=x->minimum(first.(x.second)))
-    min_thres = findfirst(d->d[1]==Pair([],[]), sort_diffs)
-    crn_diffs = Dict(crn_diff => last.(alt_vec) for (crn_diff, alt_vec) in sort_diffs[1:clamp(MAX_DIFFS, min_thres, length(all_diffs))])
-    
-    n_top = clamp(findall(x->max_logp-x.second<log(1e5), sort_by_logp)[end], min(25, n_crns), min(100, n_crns))
-    top_crns = first.(sort_by_logp)[1:n_top];
+    crn_diffs = Dict(crn_diff => last.(alt_vec) for (crn_diff, alt_vec) in sort_diffs[1:min(MAX_DIFFS, length(all_diffs))])
+
     cand_ests = Dict{Vector{Int64}, Tuple{Float64,Vector{Float64}}}(); # map CRN to (loss, estimate)
-    for crn in top_crns
+    @time for crn in top_crns
         isol = isol_by_rxs[crn]
         for (crn_diff, alt_crns) in crn_diffs
             crn_diff.second ⊆ crn || continue # CRN needs to include all reactions to be replaced
             cand_crn = translate_crn(crn, crn_diff)
+            # if length(cand_crn) > max_crn_size continue end
             for alt_crn in alt_crns
                 rep_est = replace_est(isol.est, isol_by_rxs[alt_crn].est, crn_diff.first, crn_diff.second)
                 rep_kvec = iprob.itf(rep_est[1:n_rx])
@@ -110,15 +117,13 @@ for pen_str in PEN_STRS
             end
         end
     end    
-    cand_bics = Dict(crn => 2*fit+log(length(data))*length(crn) for (crn, (fit, est)) in cand_ests)
-    cand_logps = Dict(crn => -fit-0.5*log(length(data))*length(crn)+logprior(length(crn)) for (crn, (fit, est)) in cand_ests)
-
-    sort_by_logp = sort(collect(cand_logps), by=last, rev=true)
-    n_crns = length(cand_logps)
-    n_refine = clamp(findall(x->max_logp-x.second<log(1e5), sort_by_logp)[end], min(25, n_crns), min(1000, n_crns))       
-    to_refine = [(crn, cand_ests[crn][2]) for (crn, logp) in sort_by_logp[1:n_refine]]
-    display((pen_str, n_top, length(cand_logps), n_refine))
-    flush(stdout)
+    cand_bics = Dict(crn => 2*fit+log(length(data))*length(crn) for (crn, (fit, est)) in cand_ests);
+    cand_logps = Dict(crn => -fit-0.5*log(length(data))*length(crn)+logprior(length(crn)) for (crn, (fit, est)) in cand_ests);
+    sort_by_logp = sort(collect(cand_logps), by=last, rev=true);
+    n_cands = length(cand_logps);
+    n_refine = min(n_cands, 1000)#clamp(findall(x->max_logp-x.second<log(1e10), sort_by_logp)[end], min(25, n_crns), min(1000, n_crns));  
+    to_refine = [(crn, cand_ests[crn][2]) for (crn, logp) in sort_by_logp[1:n_refine]];
+    display((pen_str, n_crns, n_top, max_crn_size, length(all_diffs), n_cands, n_refine));
     
     for (crn, est) in to_refine
         if !haskey(refine_func_dict, crn)

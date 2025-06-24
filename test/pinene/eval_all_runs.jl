@@ -16,9 +16,9 @@ include(joinpath(@__DIR__, "../../src/plot_helper.jl"));
 include(joinpath(@__DIR__, "../eval_helper.jl"));
 include(joinpath(@__DIR__, "setup.jl"));
 
-NO_CROSS = false
-EST_FNAME = NO_CROSS ? "nocross_estimates.txt" : "refined_estimates.txt";
-PLT_FNAME = NO_CROSS ? "traj_post_nocross.png" : "traj_post_crossover.png";
+# NO_CROSS = false
+# EST_FNAME = NO_CROSS ? "nocross_estimates.txt" : "refined_estimates.txt";
+# PLT_FNAME = NO_CROSS ? "traj_post_nocross.png" : "traj_post_crossover.png";
 
 smooth_resvec = smooth_data.(eachrow(data), Ref(t_obs));
 scale_fcts = get_scale_fcts(smooth_resvec, range(extrema(t_obs)..., 50), species_vec, rx_vec, k);
@@ -57,14 +57,15 @@ for pen_str in PEN_STRS
     bic_by_rxs = Dict{Vector{Int64},Float64}();
     isol_by_rxs = Dict{Vector{Int64},ODEInferenceSol}();
     opt_dir = joinpath(@__DIR__, "output", pen_str)
-    est_mat = readdlm(joinpath(opt_dir, EST_FNAME))
-    @assert allunique(findall(isfinite.(est[1:n_rx])) for est in eachcol(est_mat))
+    est_mat = readdlm(joinpath(opt_dir, "refined_estimates.txt"))
+    est_mat[findall(est_mat .≈ log(1e-6))] .= -Inf
     for est in eachcol(est_mat)
         kvec = iprob.itf(est[1:n_rx])
         σs = exp.(est[n_rx+1:end])
         isol = ODEInferenceSol(iprob, est, kvec, σs)
         rxs = findall(isfinite.(est[1:n_rx]))
         bic = 2*loss_func(kvec, σs) + length(rxs)*log(length(data))
+        if (get(bic_by_rxs, rxs, Inf) < bic) continue end
         bic_by_rxs[rxs] = bic
         isol_by_rxs[rxs] = isol
     end
@@ -98,6 +99,22 @@ sort_logp_merged = sort(collect(logp_merged), by=(x)->x.second, rev=true);
 logZ = logsumexp(last.(sort_logp_merged));
 post_merged =  Dict(rxs => exp(logj-logZ) for (rxs, logj) in sort_logp_merged);
 
+base_crns_dict = Dict{String, Set{Vector{Int64}}}()
+for pen_str in PEN_STRS
+    base_crns = Set{Vector{Int64}}();
+    opt_dir = joinpath(@__DIR__, "output", pen_str)
+    est_mat = readdlm(joinpath(opt_dir, "nocross_estimates.txt"))
+    est_mat[findall(est_mat .≈ log(1e-6))] .= -Inf
+    for est in eachcol(est_mat)
+        kvec = iprob.itf(est[1:n_rx])
+        σs = exp.(est[n_rx+1:end])
+        isol = ODEInferenceSol(iprob, est, kvec, σs)
+        rxs = findall(isfinite.(est[1:n_rx]))
+        push!(base_crns, sort(rxs))
+    end
+    base_crns_dict[pen_str] = base_crns
+end
+
 # TVD
 function calc_tvd(wdict1, wdict2)
     all_idxs = keys(wdict1) ∪ keys(wdict2)
@@ -119,14 +136,16 @@ PLOT_NEW = true
 begin
     pen_str = "logL1"
     right_range = 4:5
+    msize = 8
+    datac = (:grey40, 0.9)
     c = palette[2+findfirst((==)(pen_str), PEN_STRS)]
-    f = Figure(size=(1000, 500));
+    f = Figure(size=(1000, 500), figure_padding=5);
     xticks = 5:5:25
     for i in 1:n_species
         ax_i = div(i-1, 3) + 1
         ax_j = mod(i-1, 3) + 1
-        ax = Axis(f[ax_i, ax_j], xlabel=L"$t$ ($10^4$ min)", ylabel=L"$x_{%$i}(t)$", xtickformat="{:.0f}")
-        scatter!(t_obs ./ 1e4, data[i,:], color=(:grey, 0.9))
+        ax = Axis(f[ax_i, ax_j], xlabel=i<=2 ? "" : L"$t$ ($10^4$ min)", ylabel=L"$x_{%$i}(t)$", xtickformat="{:.0f}")
+        scatter!(t_obs ./ 1e4, data[i,:], color=datac, markersize=msize)
         # lines!(t_grid, getindex.(gold_osol.u, i), color=(palette[2],0.9), label="Gold std.")
         sort_by_w = sort(collect(post_dict_lookup[pen_str]), rev=true, by=(x)->x.second);
         for rxs in top_95_dict[pen_str]
@@ -139,13 +158,13 @@ begin
             )
         end
     end
-    ax = Axis(f[1:2,1:3], title="(a) Pinene isomerisation data and\nestimated trajectories", titlesize=18)
+    ax = Axis(f[1:2,1:3], title="Pinene isomerisation data and\nestimated trajectories", titlesize=18)
     hidedecorations!(ax)
     hidespines!(ax)
     cutoff_idx = 25
     if PLOT_NEW
         ax1 = Axis(
-            f[1:2,right_range], title="(b) Top $cutoff_idx CRNs across\nall penalty functions", titlesize=18,
+            f[1:2,right_range], title="Top $cutoff_idx CRNs across\nall penalty functions", titlesize=18,
             ylabel="Unnormalised log posterior", 
             xlabel="CRNs sorted by posterior probability", xticks=xticks, xlabelpadding=5.
         );
@@ -169,16 +188,19 @@ begin
                 #     ax1, idx-0.25+0.1*i, -0.5*bic_dict_lookup[pen_str][crn]+logprior(length(crn)),
                 #     color=(palette[i+2],0.8), marker=[:rect,:diamond,:cross,:xcross][i]
                 # )
-                b = band!(ax2, [idx-0.5, idx+0.5], fill(i-0.5,2), fill(i+0.5,2), color=(palette[i+2],0.8))
+                b = band!(ax2, [idx-0.5, idx+0.5], fill(i-0.5,2), fill(i+0.5,2), color=palette[i+2])
                 translate!(b, 0, 0, -100)
             end
+            comb_found_vec = .!(in.(first.(sort_logp_merged[idxs]), Ref(base_crns_dict[pen_str])))
+            comb_idxs = idxs[findall(comb_found_vec)]
+            scatter!(ax2, comb_idxs, fill(i, length(comb_idxs)), color=:grey20, marker=:star5)
             # size95 = min(length(top_95_dict[pen_str]), length(idxs))
             # scatter!(ax2, idxs[1:size95], fill(i, size95), color=:grey, marker=:star5)
         end       
         xlims!(0.5, cutoff_idx+0.5)
     else
         ax = Axis(
-            f[1:2,4:5], title="(b) Unnormalised log posterior\nfor top $cutoff_idx CRNs", titlesize=18,
+            f[1:2,4:5], title="Unnormalised log posterior\nfor top $cutoff_idx CRNs", titlesize=18,
             ylabel="Unnormalised log posterior", 
             xlabel="CRNs sorted by posterior", xticks=xticks
         );
@@ -194,14 +216,62 @@ begin
         f[3,4:5] = Legend(f, ax, nbanks=2, tellheight=true, labelsize=16);
     end
     f[3,1:3] = Legend(
-        f, [MarkerElement(color=(:grey, 0.9), marker=:circle), LineElement(color=c)], 
-        ["Data", L"CRNs in 95% HPD set $%$(pen_names_reg[pen_str])$ penalty"],
-        orientation=:horizontal, labelsize=16, tellheight=false, nbanks=2
+        f, [MarkerElement(color=datac, marker=:circle, markersize=msize), LineElement(color=c)], 
+        ["Data", L"CRNs in 95% HPD set ($%$(pen_names_reg[pen_str])$ penalty)"],
+        orientation=:horizontal, labelsize=16, tellheight=false
     )
+    rowgap!(f.layout, 1, 0)
     rowgap!(f.layout, 2, 5)
+    Label(
+        f[1, 1, TopLeft()], "A",
+        fontsize = 20,
+        font = :bold,
+        padding = (20, 0, 35, 0),
+        halign = :right
+    )
+    Label(
+        f[1, 4, TopLeft()], "B",
+        fontsize = 20,
+        font = :bold,
+        padding = (20, 0, 35, 0),
+        halign = :right
+    )
     f
 end
-save(joinpath(fig_dir, PLT_FNAME), f);
+save(joinpath(fig_dir, "top_crns.png"), f);
+
+f = begin
+    f = Figure(size=(800, 800), figure_padding=5);
+    for (i, pen_str) in enumerate(PEN_STRS)
+        wpairs = collect(post_dict_lookup[pen_str]);
+        ws = ProbabilityWeights(last.(wpairs));
+        hasrx_vec = [Int.(rx .∈ first.(wpairs)) for rx in 1:n_rx];
+        cmat = cor(reduce(hcat, hasrx_vec), ws);
+
+        ax_i = div(i-1, 2) + 1
+        ax_j = mod(i-1, 2) + 1
+        ax = Axis(
+            f[ax_i,ax_j],
+            title=L"%$(pen_names_reg[pen_str])\text{ penalty}",
+            titlesize=18,
+            aspect=DataAspect(), 
+            xlabel="Reaction index", ylabel="Reaction index",
+            xlabelsize=18, ylabelsize=18,
+            xticks=(1:n_rx, string.(1:n_rx)), 
+            yticks=(1:n_rx, string.(1:n_rx)), 
+        )
+        heatmap!(ax, cmat, colormap=:RdBu, colorrange=(-1,1))        
+    end
+    Label(f[1, 1:2, Top()], "Posterior correlations", valign = :bottom,
+    font = :bold, fontsize=20,
+    padding = (0, 0, 20, 0))
+    Colorbar(
+    f[1:2,3], ticklabelsize=16, colormap=:RdBu, colorrange=(-1,1), height=Relative(0.7),
+    )
+    colgap!(f.layout, 5)
+    f
+end
+save(joinpath(fig_dir, "corrs.png"), f);
 
 ## Print all reactions
 
@@ -251,13 +321,20 @@ for row in eachrow(marg_mat)
     println(join(pyfmt.(Ref(".4f"), row), " & "))
 end
 
-other_subset = sort(setdiff(1:n_rx, rx_subset))
+other_subset = sort(setdiff(1:n_rx, rx_subset));
 others_mat = [
     begin
         wdict = post_dict_lookup[pen_str]
         sum(w for (rxs, w) in wdict if rx ∈ rxs)
     end for rx in other_subset, pen_str in PEN_STRS
 ]
+
+# size of 95% HPD
+[p => length(top_95) for (p, top_95) in top_95_dict]
+[p => reduce(intersect, top_95) for (p, top_95) in top_95_dict]
+
+has9 = findfirst(x->9∈x.first, sort_logp_merged)
+post_merged[sort_logp_merged[has9].first]
 
 exit()
 
