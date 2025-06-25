@@ -20,7 +20,7 @@ isslurmjob() ? pinthreads(:affinitymask) : pinthreads(:cores);
 include(joinpath(@__DIR__, "../../src/inference.jl")); # imports functions used for inference
 include(joinpath(@__DIR__, "setup.jl"));
 
-MAX_DIST = 0; # 0 for no crossover
+MAX_DIST = 2; # 0 for no crossover
 MAX_DIFFS = 1000;
 EST_FNAME = (MAX_DIST == 0) ? "nocross_estimates.txt" : "refined_estimates.txt"
 
