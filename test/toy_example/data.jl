@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "setup.jl")); # imports helper function `get_data_dir
 using StableRNGs
 rng = StableRNG(1); # random seed for reproducibility
 
-σ_func(x) = 0.01*(maximum(x)-minimum(x)); # noise std = 5% of range
+σ_func(x) = 0.01*(maximum(x)-minimum(x)); # noise std = 1% of range
 
 # Simulate data for different ground truth rate constants
 # NB: k13 is fixed at 1.0
